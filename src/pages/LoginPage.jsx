@@ -34,9 +34,16 @@ export default function LoginPage() {
   const demo = (u, p) => { setUsername(u); setPassword(p); };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0f1e3d] via-[#1a2c5b] to-[#0d2044] flex items-center justify-center p-4">
-      {/* Background grid pattern */}
-      <div className="absolute inset-0 opacity-5" style={{
+    <div className="min-h-screen relative flex items-center justify-center p-4 overflow-hidden">
+      {/* College background image */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: 'url(/src/assets/hero.png)' }}
+      />
+      {/* Dark overlay for readability */}
+      <div className="absolute inset-0 bg-[#0a1628]/70 backdrop-blur-[1px]" />
+      {/* Subtle grid pattern on top of overlay */}
+      <div className="absolute inset-0 opacity-[0.04]" style={{
         backgroundImage: 'linear-gradient(#4a90d9 1px, transparent 1px), linear-gradient(90deg, #4a90d9 1px, transparent 1px)',
         backgroundSize: '40px 40px',
       }} />
@@ -49,7 +56,8 @@ export default function LoginPage() {
               <GraduationCap size={28} className="text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold">UniPortal</h1>
+              <p className="text-[10px] font-semibold text-white/50 uppercase tracking-widest leading-none">KVELL</p>
+              <h1 className="text-xl font-bold leading-tight">UniPortal</h1>
               <p className="text-sm text-white/60">University Admission Management</p>
             </div>
           </div>
@@ -59,6 +67,7 @@ export default function LoginPage() {
               Admission &amp; Certificate<br/>
               <span className="text-blue-300">Verification Portal</span>
             </h2>
+            <p className="text-white/50 text-xs font-semibold uppercase tracking-widest">KVELL Admission Unit Portal</p>
             <p className="text-white/60 text-sm leading-relaxed">
               A comprehensive digital solution for managing university admissions, verifying academic certificates,
               and streamlining the approval workflow for faculty and administration.
@@ -101,7 +110,8 @@ export default function LoginPage() {
               <GraduationCap size={20} className="text-white" />
             </div>
             <div>
-              <p className="font-bold text-slate-800 text-sm">UniPortal</p>
+              <p className="text-[9px] font-semibold text-slate-400 uppercase tracking-widest leading-none">KVELL</p>
+              <p className="font-bold text-slate-800 text-sm leading-tight">UniPortal</p>
               <p className="text-xs text-slate-400">Admission Management System</p>
             </div>
           </div>

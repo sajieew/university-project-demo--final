@@ -1,18 +1,20 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, UserPlus, CheckSquare,
-  BarChart3, Settings, LogOut, GraduationCap, ChevronLeft, ChevronRight, Shield, User
+  BarChart3, Settings, LogOut, GraduationCap, ChevronLeft, ChevronRight, Shield, User, GitBranch, FileText
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 const NAV_ITEMS = [
-  { to: '/',         icon: <LayoutDashboard size={18} />, label: 'Dashboard',       roles: ['Admin', 'Faculty'] },
-  { to: '/students', icon: <Users size={18} />,           label: 'Student Records',  roles: ['Admin', 'Faculty'] },
-  { to: '/students/new', icon: <UserPlus size={18} />,   label: 'New Admission',    roles: ['Admin', 'Faculty'] },
-  { to: '/verify',   icon: <CheckSquare size={18} />,    label: 'Verification',     roles: ['Admin', 'Faculty'] },
-  { to: '/reports',  icon: <BarChart3 size={18} />,      label: 'Reports',          roles: ['Admin'] },
-  { to: '/users',    icon: <Users size={18} />,          label: 'Users',            roles: ['Admin'] },
-  { to: '/settings', icon: <Settings size={18} />,       label: 'Settings',         roles: ['Admin'] },
+  { to: '/',             icon: <LayoutDashboard size={18} />, label: 'Dashboard',        roles: ['Admin', 'Faculty'] },
+  { to: '/students',     icon: <Users size={18} />,           label: 'Student Records',  roles: ['Admin', 'Faculty'] },
+  { to: '/students/new', icon: <UserPlus size={18} />,        label: 'New Admission',    roles: ['Admin', 'Faculty'] },
+  { to: '/verify',       icon: <CheckSquare size={18} />,     label: 'Verification',     roles: ['Admin', 'Faculty'] },
+  { to: '/admission-forms', icon: <FileText size={18} />,     label: 'Admission Forms',  roles: ['Admin', 'Faculty'] },
+  { to: '/reports',      icon: <BarChart3 size={18} />,       label: 'Reports',          roles: ['Admin'] },
+  { to: '/users',        icon: <Users size={18} />,           label: 'Users',            roles: ['Admin'] },
+  { to: '/settings',     icon: <Settings size={18} />,        label: 'Settings',         roles: ['Admin'] },
+  { to: '/flowchart',    icon: <GitBranch size={18} />,       label: 'Flowchart',        roles: ['Admin', 'Faculty'] },
 ];
 
 export default function Sidebar({ collapsed, onToggle }) {
@@ -35,6 +37,7 @@ export default function Sidebar({ collapsed, onToggle }) {
         </div>
         {!collapsed && (
           <div className="min-w-0">
+            <p className="text-[9px] font-semibold text-white/50 uppercase tracking-widest leading-none">KVELL</p>
             <p className="text-xs font-bold text-white leading-tight">UniPortal</p>
             <p className="text-[10px] text-white/50 leading-tight">Admission Management</p>
           </div>

@@ -1,4 +1,5 @@
 import { useFormContext } from 'react-hook-form';
+import { COMMUNITIES, GROUPS } from '../../utils/demoData';
 
 const PROGRAMMES = ['B.E.', 'B.Tech.', 'M.E.', 'M.Tech.', 'MCA', 'MBA'];
 const BRANCHES = [
@@ -20,6 +21,7 @@ const BRANCHES = [
 const CATEGORIES = ['Merit', 'Management', 'NRI', 'Other'];
 const GENDERS   = ['Male', 'Female', 'Transgender'];
 const YEARS     = ['2024-25', '2023-24', '2022-23', '2021-22', '2025-26'];
+const NATIONALITIES = ['Indian', 'Other'];
 
 function Field({ label, error, required, children }) {
   return (
@@ -34,7 +36,8 @@ function Field({ label, error, required, children }) {
 }
 
 export default function StudentDetailsForm() {
-  const { register, formState: { errors } } = useFormContext();
+  const { register, watch, formState: { errors } } = useFormContext();
+  const nationality = watch('nationality');
 
   return (
     <div className="form-section">
@@ -52,6 +55,14 @@ export default function StudentDetailsForm() {
           <input
             {...register('admissionNo')}
             placeholder="e.g. ADM-2024-001"
+            className="input-field"
+          />
+        </Field>
+
+        <Field label="Register Number" error={errors.registerNo}>
+          <input
+            {...register('registerNo')}
+            placeholder="e.g. 1234567890"
             className="input-field"
           />
         </Field>
@@ -129,6 +140,99 @@ export default function StudentDetailsForm() {
             placeholder="student@email.com"
             className={`input-field ${errors.email ? 'input-field-error' : ''}`}
           />
+        </Field>
+
+        {/* ── NEW FIELDS FOR FORM A / B / C ─────────────────────────── */}
+        <Field label="Nationality" error={errors.nationality}>
+          <select {...register('nationality')} className="input-field">
+            <option value="">Select Nationality</option>
+            {NATIONALITIES.map(n => <option key={n}>{n}</option>)}
+          </select>
+        </Field>
+
+        {nationality === 'Other' && (
+          <Field label="Country Name" error={errors.nationalityOther}>
+            <input
+              {...register('nationalityOther')}
+              placeholder="Enter country name"
+              className="input-field"
+            />
+          </Field>
+        )}
+
+        <Field label="Community" error={errors.community}>
+          <select {...register('community')} className="input-field">
+            <option value="">Select Community</option>
+            {COMMUNITIES.map(c => <option key={c}>{c}</option>)}
+          </select>
+        </Field>
+
+        <Field label="Group (Qualifying Exam)" error={errors.group}>
+          <select {...register('group')} className="input-field">
+            <option value="">Select Group</option>
+            {GROUPS.map(g => <option key={g}>{g}</option>)}
+          </select>
+        </Field>
+      </div>
+
+      {/* Subject Marks */}
+      <div className="mt-6">
+        <h3 className="text-sm font-semibold text-slate-600 mb-3">Subject Marks (for Form B)</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Maths */}
+          <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+            <p className="text-xs font-semibold text-slate-600 mb-2">Mathematics</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Obtained" error={errors.mathsObt}>
+                <input type="number" min="0" max="200" {...register('mathsObt', { min: 0, max: 200, valueAsNumber: true })} placeholder="0" className="input-field" />
+              </Field>
+              <Field label="Maximum" error={errors.mathsMax}>
+                <input type="number" min="0" max="200" {...register('mathsMax', { min: 0, max: 200, valueAsNumber: true })} placeholder="100" className="input-field" />
+              </Field>
+            </div>
+          </div>
+          {/* Physics */}
+          <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+            <p className="text-xs font-semibold text-slate-600 mb-2">Physics</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Obtained" error={errors.physicsObt}>
+                <input type="number" min="0" max="200" {...register('physicsObt', { min: 0, max: 200, valueAsNumber: true })} placeholder="0" className="input-field" />
+              </Field>
+              <Field label="Maximum" error={errors.physicsMax}>
+                <input type="number" min="0" max="200" {...register('physicsMax', { min: 0, max: 200, valueAsNumber: true })} placeholder="100" className="input-field" />
+              </Field>
+            </div>
+          </div>
+          {/* Chemistry */}
+          <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+            <p className="text-xs font-semibold text-slate-600 mb-2">Chemistry</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Obtained" error={errors.chemObt}>
+                <input type="number" min="0" max="200" {...register('chemObt', { min: 0, max: 200, valueAsNumber: true })} placeholder="0" className="input-field" />
+              </Field>
+              <Field label="Maximum" error={errors.chemMax}>
+                <input type="number" min="0" max="200" {...register('chemMax', { min: 0, max: 200, valueAsNumber: true })} placeholder="100" className="input-field" />
+              </Field>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* FG and AFW */}
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="FG (First Graduate)" error={errors.fg}>
+          <select {...register('fg')} className="input-field">
+            <option value="">Select</option>
+            <option value="Yes">Yes</option>
+            <option value="No">No</option>
+          </select>
+        </Field>
+        <Field label="AFW (Armed Forces Ward)" error={errors.afw}>
+          <select {...register('afw')} className="input-field">
+            <option value="">Select</option>
+            <option value="Yes">Yes</option>
+            <option value="No">No</option>
+          </select>
         </Field>
       </div>
     </div>

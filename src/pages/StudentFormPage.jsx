@@ -65,6 +65,7 @@ export default function StudentFormPage() {
 
       setValue('applicationNo', s.applicationNo);
       setValue('admissionNo', s.admissionNo);
+      setValue('registerNo', s.registerNo || '');
       setValue('name', s.name);
       setValue('dob', s.dob);
       setValue('gender', s.gender);
@@ -74,6 +75,19 @@ export default function StudentFormPage() {
       setValue('mobile', s.mobile);
       setValue('email', s.email);
       setValue('academicYear', s.academicYear);
+      // New fields (safe — undefined if not set)
+      setValue('nationality', s.nationality || '');
+      setValue('nationalityOther', s.nationalityOther || '');
+      setValue('community', s.community || '');
+      setValue('group', s.group || '');
+      setValue('mathsObt', s.mathsObt ?? '');
+      setValue('mathsMax', s.mathsMax ?? '');
+      setValue('physicsObt', s.physicsObt ?? '');
+      setValue('physicsMax', s.physicsMax ?? '');
+      setValue('chemObt', s.chemObt ?? '');
+      setValue('chemMax', s.chemMax ?? '');
+      setValue('fg', s.fg || '');
+      setValue('afw', s.afw || '');
 
       setCertificates(s.certificates || {});
       setStages(s.stages || makeStages());
@@ -98,9 +112,25 @@ export default function StudentFormPage() {
     const allVerified = Object.values(stages).every(s => s.status === 'Completed' || s.status === 'NA');
     const verificationStatus = allVerified ? 'Verified' : 'Pending';
 
+    // Auto-calculate totals from subject marks
+    const mathsObt = Number(data.mathsObt) || 0;
+    const mathsMax = Number(data.mathsMax) || 0;
+    const physicsObt = Number(data.physicsObt) || 0;
+    const physicsMax = Number(data.physicsMax) || 0;
+    const chemObt = Number(data.chemObt) || 0;
+    const chemMax = Number(data.chemMax) || 0;
+    const totalObt = mathsObt + physicsObt + chemObt;
+    const totalMax = mathsMax + physicsMax + chemMax;
+    const percentage = totalMax > 0 ? parseFloat(((totalObt / totalMax) * 100).toFixed(2)) : 0;
+
     const record = {
       id: isEdit ? id : generateId(),
       ...data,
+      // Computed marks
+      mathsObt, mathsMax,
+      physicsObt, physicsMax,
+      chemObt, chemMax,
+      totalObt, totalMax, percentage,
       certificates,
       stages,
       eligibility,

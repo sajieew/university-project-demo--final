@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import {
   Users, CheckCircle, Clock, XCircle, FileText,
-  UserPlus, Search, BarChart3, ArrowRight, TrendingUp
+  UserPlus, Search, BarChart3, ArrowRight, TrendingUp, GitBranch
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
@@ -67,12 +67,12 @@ export default function DashboardPage() {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-        <StatCard icon={<Users size={20} />} label="Total Applications" value={total} color="blue" onClick={() => navigate('/students')} />
-        <StatCard icon={<CheckCircle size={20} />} label="Verified" value={verified} color="emerald" />
-        <StatCard icon={<Clock size={20} />} label="Pending" value={pending} color="amber" onClick={() => navigate('/students?status=Pending')} />
-        <StatCard icon={<FileText size={20} />} label="Approved" value={approved} color="emerald" />
-        <StatCard icon={<TrendingUp size={20} />} label="Provisional" value={provAppr} color="violet" />
-        <StatCard icon={<XCircle size={20} />} label="Rejected" value={rejected} color="red" />
+        <StatCard icon={<Users size={20} />}       label="Total Applications" value={total}    color="blue"    onClick={() => navigate('/students')} />
+        <StatCard icon={<CheckCircle size={20} />} label="Verified"           value={verified} color="emerald" onClick={() => navigate('/students?verificationStatus=Verified')} />
+        <StatCard icon={<Clock size={20} />}       label="Pending"            value={pending}  color="amber"   onClick={() => navigate('/students?verificationStatus=Pending')} />
+        <StatCard icon={<FileText size={20} />}    label="Approved"           value={approved} color="emerald" onClick={() => navigate('/students?admissionStatus=Approved')} />
+        <StatCard icon={<TrendingUp size={20} />}  label="Provisional"        value={provAppr} color="violet"  onClick={() => navigate('/students?admissionStatus=Provisionally+Approved')} />
+        <StatCard icon={<XCircle size={20} />}     label="Rejected"           value={rejected} color="red"     onClick={() => navigate('/students?admissionStatus=Rejected')} />
       </div>
 
       {/* Middle row */}
@@ -86,6 +86,8 @@ export default function DashboardPage() {
               { label: 'View All Records',       icon: <Users size={15} />,    path: '/students',     color: 'text-slate-700 bg-slate-50' },
               { label: 'Pending Verification',   icon: <Clock size={15} />,    path: '/verify',       color: 'text-amber-700 bg-amber-50' },
               { label: 'Generate Reports',       icon: <BarChart3 size={15} />, path: '/reports',     color: 'text-emerald-700 bg-emerald-50' },
+              { label: 'View Flowchart',          icon: <GitBranch size={15} />, path: '/flowchart',        color: 'text-violet-700 bg-violet-50' },
+              { label: 'Admission Forms',         icon: <FileText size={15} />,  path: '/admission-forms',  color: 'text-teal-700 bg-teal-50' },
             ].map(action => (
               <button
                 key={action.path}
@@ -102,23 +104,66 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Programme-wise */}
+        {/* Programme-wise — improved donut chart */}
         <div className="card p-5">
-          <h3 className="text-sm font-semibold text-slate-700 mb-4">Programme-wise Students</h3>
-          <div className="space-y-2.5">
-            {programmes.map((p, i) => (
-              <div key={p} className="flex items-center gap-3">
-                <span className="text-xs text-slate-500 w-16 flex-shrink-0">{p}</span>
-                <div className="flex-1 bg-slate-100 rounded-full h-1.5">
-                  <div
-                    className="h-1.5 rounded-full bg-blue-600 transition-all duration-500"
-                    style={{ width: `${(progData[i] / (total || 1)) * 100}%` }}
-                  />
-                </div>
-                <span className="text-xs font-semibold text-slate-700 w-5 text-right">{progData[i]}</span>
+          <h3 className="text-sm font-semibold text-slate-700 mb-1">Programme-wise Students</h3>
+          <p className="text-xs text-slate-400 mb-4">{total} total enrolments</p>
+
+          {total === 0 ? (
+            <p className="text-xs text-slate-400 py-6 text-center">No data yet</p>
+          ) : (
+            <div className="flex items-center gap-4">
+              {/* Donut SVG */}
+              <div className="flex-shrink-0">
+                {(() => {
+                  const PROG_COLORS = ['#3b82f6','#10b981','#8b5cf6','#f59e0b','#ef4444','#06b6d4'];
+                  const r = 38, cx = 46, cy = 46, stroke = 13;
+                  const circ = 2 * Math.PI * r;
+                  let offset = 0;
+                  const slices = programmes.map((p, i) => {
+                    const pct = progData[i] / (total || 1);
+                    const dash = pct * circ;
+                    const s = { p, count: progData[i], color: PROG_COLORS[i], dash, offset };
+                    offset += dash;
+                    return s;
+                  });
+                  return (
+                    <svg width="92" height="92" viewBox="0 0 92 92">
+                      {/* background ring */}
+                      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#f1f5f9" strokeWidth={stroke} />
+                      {slices.map((s, i) => s.count > 0 && (
+                        <circle key={i} cx={cx} cy={cy} r={r} fill="none"
+                          stroke={s.color} strokeWidth={stroke}
+                          strokeDasharray={`${s.dash} ${circ - s.dash}`}
+                          strokeDashoffset={-s.offset + circ * 0.25}
+                          style={{ transform: 'rotate(-90deg)', transformOrigin: `${cx}px ${cy}px` }}
+                        />
+                      ))}
+                      {/* centre label */}
+                      <text x={cx} y={cy - 4} textAnchor="middle" fontSize="13" fontWeight="700" fill="#1e293b">{total}</text>
+                      <text x={cx} y={cy + 9} textAnchor="middle" fontSize="7" fill="#94a3b8">students</text>
+                    </svg>
+                  );
+                })()}
               </div>
-            ))}
-          </div>
+
+              {/* Legend */}
+              <div className="flex-1 space-y-1.5 min-w-0">
+                {programmes.map((p, i) => {
+                  const PROG_COLORS = ['#3b82f6','#10b981','#8b5cf6','#f59e0b','#ef4444','#06b6d4'];
+                  const pct = total ? Math.round((progData[i] / total) * 100) : 0;
+                  return (
+                    <div key={p} className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: PROG_COLORS[i] }} />
+                      <span className="text-[11px] text-slate-600 flex-1 truncate">{p}</span>
+                      <span className="text-[11px] font-semibold text-slate-800 w-5 text-right">{progData[i]}</span>
+                      <span className="text-[10px] text-slate-400 w-8 text-right">{pct}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Admission Status */}

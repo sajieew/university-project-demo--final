@@ -15,7 +15,7 @@ function addHeader(doc, y) {
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text('UNIVERSITY ADMISSION & CERTIFICATE VERIFICATION PORTAL', 105, 11, { align: 'center' });
+  doc.text('KVELL ADMISSION UNIT PORTAL', 105, 11, { align: 'center' });
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
   doc.text('Certificate Verification Form — Academic Year', 105, 19, { align: 'center' });
@@ -45,11 +45,20 @@ function labelValue(doc, label, value, x, y, labelW = 55) {
 }
 
 function checkMark(doc, x, y, checked) {
-  doc.rect(x, y - 3, 4, 4);
+  // Draw the outer square box
+  doc.setDrawColor(60, 60, 60);
+  doc.setLineWidth(0.4);
+  doc.rect(x, y - 3.2, 4, 4);
   if (checked) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7);
-    doc.text('✓', x + 0.5, y);
+    // Draw a tick using two lines (vector — no Unicode dependency)
+    doc.setLineWidth(0.6);
+    doc.setDrawColor(10, 100, 10);
+    // Short leg: bottom-left corner to mid-bottom
+    doc.line(x + 0.6, y - 0.8, x + 1.5, y + 0.2);
+    // Long leg: mid-bottom up to top-right
+    doc.line(x + 1.5, y + 0.2, x + 3.4, y - 2.6);
+    doc.setDrawColor(60, 60, 60);
+    doc.setLineWidth(0.4);
   }
 }
 
@@ -111,7 +120,11 @@ export const generateStudentPDF = (student) => {
     checkMark(doc, 130, y + 4, row.originalProduced);
     checkMark(doc, 151, y + 4, row.photocopySubmitted);
     checkMark(doc, 170, y + 4, row.verified);
-    doc.text(row.remarks || '', 183, y + 4, { maxWidth: 12 });
+    if (row.remarks) {
+      doc.setFontSize(6.5);
+      doc.text(String(row.remarks), 182, y + 4, { maxWidth: 26 });
+      doc.setFontSize(7);
+    }
     y += 6;
   });
   y += 5;
@@ -234,7 +247,7 @@ export const generateStudentPDF = (student) => {
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...TEXT_LIGHT);
-    doc.text('University Admission & Certificate Verification Portal — DEMO ONLY', 105, 290, { align: 'center' });
+    doc.text('KVELL Admission Unit Portal — Certificate Verification Form', 105, 290, { align: 'center' });
     doc.text(`Page ${i} of ${totalPages}`, 196, 290, { align: 'right' });
     doc.text(new Date().toLocaleDateString('en-IN'), 14, 290);
   }

@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
-import { seedDemoData } from './utils/demoData';
+import { seedDemoData, seedDummyAdmissions } from './utils/demoData';
 
 import AppLayout from './components/layout/AppLayout';
 import LoginPage from './pages/LoginPage';
@@ -15,9 +15,13 @@ import UsersPage from './pages/UsersPage';
 import SettingsPage from './pages/SettingsPage';
 import VerificationPage from './pages/VerificationPage';
 import NotFoundPage from './pages/NotFoundPage';
+import FlowchartPage from './pages/FlowchartPage';
+import AdmissionFormsPage from './pages/AdmissionFormsPage';
 
 // Seed demo data on first load
 seedDemoData();
+// Append dummy admission records for Form A / B / C testing (never overwrites real data)
+seedDummyAdmissions();
 
 function ProtectedRoute({ children, adminOnly = false }) {
   const { user, loading } = useAuth();
@@ -63,6 +67,8 @@ function AppRoutes() {
         <Route path="reports" element={<ProtectedRoute adminOnly><ReportsPage /></ProtectedRoute>} />
         <Route path="users" element={<ProtectedRoute adminOnly><UsersPage /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute adminOnly><SettingsPage /></ProtectedRoute>} />
+        <Route path="flowchart" element={<FlowchartPage />} />
+        <Route path="admission-forms" element={<AdmissionFormsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

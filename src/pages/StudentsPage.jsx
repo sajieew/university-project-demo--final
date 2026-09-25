@@ -15,8 +15,17 @@ export default function StudentsPage() {
   const [searchParams] = useSearchParams();
 
   const [search, setSearch] = useState(searchParams.get('q') || '');
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
-  const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS);
+  const [filters, setFilters] = useState(() => {
+    // Pre-apply filter from URL params set by Dashboard stat cards
+    const vs = searchParams.get('verificationStatus') || '';
+    const as_ = searchParams.get('admissionStatus') || '';
+    return { ...EMPTY_FILTERS, verificationStatus: vs, admissionStatus: as_ };
+  });
+  const [appliedFilters, setAppliedFilters] = useState(() => {
+    const vs = searchParams.get('verificationStatus') || '';
+    const as_ = searchParams.get('admissionStatus') || '';
+    return { ...EMPTY_FILTERS, verificationStatus: vs, admissionStatus: as_ };
+  });
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(0);
   const [toDelete, setToDelete] = useState(null);
