@@ -1,7 +1,7 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Pencil, FileDown, Printer, Trash2, CheckCircle, Clock, Minus } from 'lucide-react';
-import { findStudent } from '../utils/localStorage';
+import { findStudent, normalizeVerificationStages } from '../utils/localStorage';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/ui/StatusBadge';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
@@ -10,6 +10,8 @@ import { UG_CERTIFICATES, PG_CERTIFICATES, VERIFICATION_STAGES, ELIGIBILITY_PARA
 import { formatDate } from '../utils/validation';
 
 const isUG = (p) => ['B.E.', 'B.Tech.'].includes(p);
+const signatureLabel = (signature) =>
+  typeof signature === 'string' ? signature : signature?.fileName || '';
 
 const STAGE_ICONS = {
   Completed: <CheckCircle size={16} className="text-emerald-500" />,
@@ -42,6 +44,7 @@ export default function StudentDetailPage() {
   if (!student) return null;
 
   const certs = isUG(student.programme) ? UG_CERTIFICATES : PG_CERTIFICATES;
+  const stages = normalizeVerificationStages(student.stages);
 
   const handleDelete = () => {
     removeStudent(student.id);
@@ -157,7 +160,7 @@ export default function StudentDetailPage() {
         <h2 className="section-title">Section C — Verification Process</h2>
         <div className="space-y-3">
           {VERIFICATION_STAGES.map(stage => {
-            const s = student.stages?.[stage.id] || { status: 'Pending' };
+            const s = stages[stage.id] || { status: 'Pending' };
             return (
               <div key={stage.id} className="flex items-start gap-4 py-2 border-b border-slate-50 last:border-0">
                 <div className="flex-shrink-0 mt-0.5">{STAGE_ICONS[s.status] || STAGE_ICONS.Pending}</div>
@@ -204,7 +207,7 @@ export default function StudentDetailPage() {
           <h2 className="section-title">Section E — Declaration</h2>
           <DetailRow label="Student Name" value={student.declaration?.name} />
           <DetailRow label="Date"         value={formatDate(student.declaration?.date)} />
-          <DetailRow label="Signature"    value={student.declaration?.signature} />
+          <DetailRow label="Signature"    value={signatureLabel(student.declaration?.signature)} />
         </div>
 
         {/* F: Verification Officer */}
@@ -213,7 +216,7 @@ export default function StudentDetailPage() {
           <DetailRow label="Name"        value={student.officer?.name} />
           <DetailRow label="Designation" value={student.officer?.designation} />
           <DetailRow label="Date"        value={formatDate(student.officer?.date)} />
-          <DetailRow label="Signature"   value={student.officer?.signature} />
+          <DetailRow label="Signature"   value={signatureLabel(student.officer?.signature)} />
         </div>
 
         {/* G: Admission Approval */}
@@ -225,7 +228,7 @@ export default function StudentDetailPage() {
           <DetailRow label="Officer"   value={student.approval?.officer} />
           <DetailRow label="Date"      value={formatDate(student.approval?.date)} />
           <DetailRow label="Remarks"   value={student.approval?.remarks} />
-          <DetailRow label="Signature" value={student.approval?.signature} />
+          <DetailRow label="Signature" value={signatureLabel(student.approval?.signature)} />
         </div>
       </div>
 

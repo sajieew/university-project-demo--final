@@ -17,6 +17,9 @@ import VerificationPage from './pages/VerificationPage';
 import NotFoundPage from './pages/NotFoundPage';
 import FlowchartPage from './pages/FlowchartPage';
 import AdmissionFormsPage from './pages/AdmissionFormsPage';
+import Stage1VerificationPage from './pages/Stage1VerificationPage';
+import Stage2VerificationPage from './pages/Stage2VerificationPage';
+import StageCertificateVerificationPage from './pages/StageCertificateVerificationPage';
 
 // Seed demo data on first load
 seedDemoData();
@@ -69,6 +72,13 @@ function AppRoutes() {
         <Route path="settings" element={<ProtectedRoute adminOnly><SettingsPage /></ProtectedRoute>} />
         <Route path="flowchart" element={<FlowchartPage />} />
         <Route path="admission-forms" element={<AdmissionFormsPage />} />
+        <Route path="verification/stage-1" element={<Stage1VerificationPage />} />
+        <Route path="verification/stage-2/:studentId" element={<Stage2VerificationPage />} />
+        <Route path="verification/stage-3/:studentId" element={<StageCertificateVerificationPage stageNumber={3} />} />
+        <Route path="verification/stage-4/:studentId" element={<StageCertificateVerificationPage stageNumber={4} />} />
+        <Route path="verification/stage-5/:studentId" element={<StageCertificateVerificationPage stageNumber={5} />} />
+        <Route path="verification/stage-6/:studentId" element={<StageCertificateVerificationPage stageNumber={6} />} />
+        <Route path="verification/stage-7/:studentId" element={<StageCertificateVerificationPage stageNumber={7} />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

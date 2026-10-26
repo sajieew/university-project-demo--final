@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useForm, FormProvider } from 'react-hook-form';
 import { Save, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { findStudent } from '../utils/localStorage';
+import { findStudent, normalizeVerificationStages } from '../utils/localStorage';
 import { generateId } from '../utils/validation';
 import { UG_CERTIFICATES, PG_CERTIFICATES, VERIFICATION_STAGES, ELIGIBILITY_PARAMETERS } from '../utils/demoData';
 
@@ -41,6 +41,7 @@ const SECTIONS = [
 export default function StudentFormPage() {
   const { id } = useParams();
   const isEdit = !!id;
+  const location = useLocation();
   const navigate = useNavigate();
   const { createStudent, editStudent } = useApp();
 
@@ -53,7 +54,16 @@ export default function StudentFormPage() {
   const [declaration, setDeclaration]   = useState({ name: '', date: '', signature: '' });
   const [officer, setOfficer]           = useState({ name: '', designation: '', signature: '', date: '' });
   const [approval, setApproval]         = useState({ status: 'Pending', remarks: '', officer: '', date: '', signature: '' });
-  const [openSections, setOpenSections] = useState({ 0: true, 1: true, 2: false, 3: false, 4: false, 5: false, 6: false });
+  const [openSections, setOpenSections] = useState(() => ({
+    0: true,
+    1: true,
+    2: location.state?.openSection === 2,
+    3: false,
+    4: false,
+    5: false,
+    6: false,
+  }));
+  const [draftId] = useState(() => location.state?.recordId || generateId());
 
   const programme = watch('programme');
 
@@ -90,7 +100,7 @@ export default function StudentFormPage() {
       setValue('afw', s.afw || '');
 
       setCertificates(s.certificates || {});
-      setStages(s.stages || makeStages());
+      setStages(normalizeVerificationStages(s.stages || makeStages()));
       setEligibility(s.eligibility || makeEligibility());
       setDeclaration(s.declaration || { name: '', date: '', signature: '' });
       setOfficer(s.officer || { name: '', designation: '', signature: '', date: '' });
@@ -124,7 +134,7 @@ export default function StudentFormPage() {
     const percentage = totalMax > 0 ? parseFloat(((totalObt / totalMax) * 100).toFixed(2)) : 0;
 
     const record = {
-      id: isEdit ? id : generateId(),
+      id: isEdit ? id : draftId,
       ...data,
       // Computed marks
       mathsObt, mathsMax,
@@ -196,11 +206,36 @@ export default function StudentFormPage() {
                 <div className="border-t border-slate-100 p-6">
                   {idx === 0 && <StudentDetailsForm />}
                   {idx === 1 && <CertificateChecklist programme={programme} certificates={certificates} onChange={setCertificates} />}
-                  {idx === 2 && <VerificationStepper stages={stages} onChange={setStages} />}
+                  {idx === 2 && (
+                    <VerificationStepper
+                      stages={stages}
+                      onChange={setStages}
+                      recordId={isEdit ? id : draftId}
+                      isEdit={isEdit}
+                    />
+                  )}
                   {idx === 3 && <EligibilityForm eligibility={eligibility} onChange={setEligibility} />}
-                  {idx === 4 && <DeclarationSection declaration={declaration} onChange={setDeclaration} />}
-                  {idx === 5 && <VerificationOfficerForm officer={officer} onChange={setOfficer} />}
-                  {idx === 6 && <AdmissionApprovalForm approval={approval} onChange={setApproval} />}
+                  {idx === 4 && (
+                    <DeclarationSection
+                      declaration={declaration}
+                      onChange={setDeclaration}
+                      applicationId={isEdit ? id : draftId}
+                    />
+                  )}
+                  {idx === 5 && (
+                    <VerificationOfficerForm
+                      officer={officer}
+                      onChange={setOfficer}
+                      applicationId={isEdit ? id : draftId}
+                    />
+                  )}
+                  {idx === 6 && (
+                    <AdmissionApprovalForm
+                      approval={approval}
+                      onChange={setApproval}
+                      applicationId={isEdit ? id : draftId}
+                    />
+                  )}
                 </div>
               )}
             </div>

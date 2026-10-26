@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { Check, Clock, Minus } from 'lucide-react';
 import { VERIFICATION_STAGES } from '../../utils/demoData';
 
@@ -9,7 +10,7 @@ const STATUS_STYLES = {
   NA:        { dot: 'bg-slate-300 border-slate-300',  text: 'text-slate-500',  icon: <Minus size={12} className="text-white" /> },
 };
 
-export default function VerificationStepper({ stages, onChange }) {
+export default function VerificationStepper({ stages, onChange, recordId, isEdit }) {
   const update = (id, field, value) => {
     onChange({ ...stages, [id]: { ...(stages[id] || {}), [field]: value } });
   };
@@ -18,7 +19,7 @@ export default function VerificationStepper({ stages, onChange }) {
     <div className="form-section">
       <h2 className="section-title">Section C — Verification Process</h2>
       <div className="space-y-4">
-        {VERIFICATION_STAGES.map((stage, idx) => {
+        {VERIFICATION_STAGES.map(stage => {
           const s = stages[stage.id] || { status: 'Pending', verifiedBy: '', date: '', remarks: '' };
           const st = STATUS_STYLES[s.status] || STATUS_STYLES.Pending;
 
@@ -31,8 +32,43 @@ export default function VerificationStepper({ stages, onChange }) {
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-bold text-slate-400">Stage {stage.id}</span>
-                    <span className="text-sm font-semibold text-slate-700">{stage.name}</span>
+                    {stage.id === 1 ? (
+                      <Link
+                        to="/verification/stage-1"
+                        className="text-sm font-semibold text-blue-700 hover:text-blue-900 hover:underline"
+                      >
+                        Stage {stage.id} — {stage.name}
+                      </Link>
+                    ) : stage.id === 2 ? (
+                      <Link
+                        to={`/verification/stage-2/${recordId}`}
+                        state={{
+                          returnTo: isEdit ? `/students/${recordId}/edit` : '/students/new',
+                          recordId,
+                          openSection: 2,
+                        }}
+                        className="text-sm font-semibold text-blue-700 hover:text-blue-900 hover:underline"
+                      >
+                        Stage {stage.id} — {stage.name}
+                      </Link>
+                    ) : stage.id >= 3 ? (
+                      <Link
+                        to={`/verification/stage-${stage.id}/${recordId}`}
+                        state={{
+                          returnTo: isEdit ? `/students/${recordId}/edit` : '/students/new',
+                          recordId,
+                          openSection: 2,
+                        }}
+                        className="text-sm font-semibold text-blue-700 hover:text-blue-900 hover:underline"
+                      >
+                        Stage {stage.id} — {stage.name}
+                      </Link>
+                    ) : (
+                      <>
+                        <span className="text-xs font-bold text-slate-400">Stage {stage.id}</span>
+                        <span className="text-sm font-semibold text-slate-700">{stage.name}</span>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="flex gap-1">

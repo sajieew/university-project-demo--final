@@ -1,7 +1,10 @@
 import jsPDF from 'jspdf';
 import { UG_CERTIFICATES, PG_CERTIFICATES, VERIFICATION_STAGES, ELIGIBILITY_PARAMETERS } from './demoData';
+import { normalizeVerificationStages } from './localStorage';
 
 const isUG = (p) => ['B.E.', 'B.Tech.'].includes(p);
+const signatureLabel = (signature) =>
+  typeof signature === 'string' ? signature : signature?.fileName || '_______________';
 
 const NAVY = [26, 54, 93];
 const LIGHT_GRAY = [245, 245, 245];
@@ -145,8 +148,9 @@ export const generateStudentPDF = (student) => {
   y += 6;
   doc.setTextColor(...TEXT_DARK);
 
+  const stages = normalizeVerificationStages(student.stages);
   VERIFICATION_STAGES.forEach((stage, idx) => {
-    const s = student.stages?.[stage.id] || {};
+    const s = stages[stage.id] || {};
     if (y > 265) { doc.addPage(); y = addHeader(doc, 0); }
     const bg = idx % 2 === 0 ? [255, 255, 255] : LIGHT_GRAY;
     doc.setFillColor(...bg);
@@ -207,7 +211,7 @@ export const generateStudentPDF = (student) => {
   labelValue(doc, 'Name', student.declaration?.name, 14, y);
   labelValue(doc, 'Date', student.declaration?.date, 110, y);
   y += 7;
-  labelValue(doc, 'Signature', student.declaration?.signature || '_______________', 14, y);
+  labelValue(doc, 'Signature', signatureLabel(student.declaration?.signature), 14, y);
   y += 12;
 
   // Section F: Verification Officer
@@ -216,7 +220,7 @@ export const generateStudentPDF = (student) => {
   labelValue(doc, 'Designation', student.officer?.designation, 110, y);
   y += 7;
   labelValue(doc, 'Date', student.officer?.date, 14, y);
-  labelValue(doc, 'Signature', student.officer?.signature || '_______________', 110, y);
+  labelValue(doc, 'Signature', signatureLabel(student.officer?.signature), 110, y);
   y += 12;
 
   // Section G: Admission Approval
@@ -238,7 +242,7 @@ export const generateStudentPDF = (student) => {
   labelValue(doc, 'Officer Name', student.approval?.officer, 14, y);
   labelValue(doc, 'Date', student.approval?.date, 110, y);
   y += 7;
-  labelValue(doc, 'Signature', student.approval?.signature || '_______________', 14, y);
+  labelValue(doc, 'Signature', signatureLabel(student.approval?.signature), 14, y);
 
   // Footer
   const totalPages = doc.internal.getNumberOfPages();

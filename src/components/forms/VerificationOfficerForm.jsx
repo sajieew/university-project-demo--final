@@ -1,4 +1,6 @@
-export default function VerificationOfficerForm({ officer, onChange }) {
+import SignatureUpload from './SignatureUpload';
+
+export default function VerificationOfficerForm({ officer, onChange, applicationId }) {
   const update = (field, value) => onChange({ ...officer, [field]: value });
 
   return (
@@ -26,13 +28,11 @@ export default function VerificationOfficerForm({ officer, onChange }) {
           />
         </div>
         <div>
-          <label className="label">Signature (Text Placeholder)</label>
-          <input
-            type="text"
-            value={officer.signature || ''}
-            onChange={e => update('signature', e.target.value)}
-            placeholder="Type signature / initials"
-            className="input-field font-serif italic"
+          <SignatureUpload
+            applicationId={applicationId}
+            section="officer"
+            signature={officer.signature}
+            onChange={value => update('signature', value)}
           />
         </div>
         <div>

@@ -1,4 +1,4 @@
-import StatusBadge from '../ui/StatusBadge';
+import SignatureUpload from './SignatureUpload';
 
 const ADMISSION_STATUSES = ['Approved', 'Provisionally Approved', 'Pending', 'Rejected'];
 
@@ -9,7 +9,7 @@ const STATUS_STYLES = {
   'Rejected':               'border-red-400 bg-red-50',
 };
 
-export default function AdmissionApprovalForm({ approval, onChange }) {
+export default function AdmissionApprovalForm({ approval, onChange, applicationId }) {
   const update = (field, value) => onChange({ ...approval, [field]: value });
 
   return (
@@ -68,13 +68,11 @@ export default function AdmissionApprovalForm({ approval, onChange }) {
           />
         </div>
         <div>
-          <label className="label">Signature (Text Placeholder)</label>
-          <input
-            type="text"
-            value={approval.signature || ''}
-            onChange={e => update('signature', e.target.value)}
-            placeholder="Type signature / initials"
-            className="input-field font-serif italic"
+          <SignatureUpload
+            applicationId={applicationId}
+            section="approval"
+            signature={approval.signature}
+            onChange={value => update('signature', value)}
           />
         </div>
         <div>

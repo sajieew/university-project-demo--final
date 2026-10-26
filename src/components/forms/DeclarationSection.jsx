@@ -1,4 +1,6 @@
-export default function DeclarationSection({ declaration, onChange }) {
+import SignatureUpload from './SignatureUpload';
+
+export default function DeclarationSection({ declaration, onChange, applicationId }) {
   const update = (field, value) => onChange({ ...declaration, [field]: value });
 
   return (
@@ -35,13 +37,11 @@ export default function DeclarationSection({ declaration, onChange }) {
           />
         </div>
         <div>
-          <label className="label">Signature (Text Placeholder)</label>
-          <input
-            type="text"
-            value={declaration.signature || ''}
-            onChange={e => update('signature', e.target.value)}
-            placeholder="Type signature / initials"
-            className="input-field font-serif italic"
+          <SignatureUpload
+            applicationId={applicationId}
+            section="declaration"
+            signature={declaration.signature}
+            onChange={value => update('signature', value)}
           />
         </div>
       </div>
