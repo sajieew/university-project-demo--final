@@ -21,8 +21,11 @@ export default function Sidebar({ collapsed, onToggle }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  const filtered = NAV_ITEMS.filter(item => item.roles.includes(user?.role));
+  const userRole = String(user?.role || 'Faculty').trim().toLowerCase();
 
+  const filtered = NAV_ITEMS.filter(item =>
+    item.roles.some(role => role.toLowerCase() === userRole)
+  );
   const handleLogout = () => { logout(); navigate('/login'); };
 
   return (
