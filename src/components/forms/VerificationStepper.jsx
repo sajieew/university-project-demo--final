@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Check, Clock, Minus } from 'lucide-react';
 import { VERIFICATION_STAGES } from '../../utils/demoData';
 
@@ -11,6 +11,8 @@ const STATUS_STYLES = {
 };
 
 export default function VerificationStepper({ stages, onChange, recordId, isEdit }) {
+  const location = useLocation();
+
   const update = (id, field, value) => {
     onChange({ ...stages, [id]: { ...(stages[id] || {}), [field]: value } });
   };
@@ -35,6 +37,12 @@ export default function VerificationStepper({ stages, onChange, recordId, isEdit
                     {stage.id === 1 ? (
                       <Link
                         to="/verification/stage-1"
+                        state={{
+                          returnTo: isEdit ? `/students/${recordId}/edit` : '/students/new',
+                          returnToKey: location.key,
+                          recordId,
+                          openSection: 2,
+                        }}
                         className="text-sm font-semibold text-blue-700 hover:text-blue-900 hover:underline"
                       >
                         Stage {stage.id} — {stage.name}
@@ -44,6 +52,7 @@ export default function VerificationStepper({ stages, onChange, recordId, isEdit
                         to={`/verification/stage-2/${recordId}`}
                         state={{
                           returnTo: isEdit ? `/students/${recordId}/edit` : '/students/new',
+                          returnToKey: location.key,
                           recordId,
                           openSection: 2,
                         }}
@@ -56,6 +65,7 @@ export default function VerificationStepper({ stages, onChange, recordId, isEdit
                         to={`/verification/stage-${stage.id}/${recordId}`}
                         state={{
                           returnTo: isEdit ? `/students/${recordId}/edit` : '/students/new',
+                          returnToKey: location.key,
                           recordId,
                           openSection: 2,
                         }}

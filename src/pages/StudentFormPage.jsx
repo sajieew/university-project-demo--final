@@ -31,6 +31,8 @@ const SECTIONS = [
   { index: 6, title: 'Admission Approval' },
 ];
 
+const sectionStatesByHistoryKey = new Map();
+
 export default function StudentFormPage() {
   const { id } = useParams();
   const isEdit = !!id;
@@ -46,15 +48,21 @@ export default function StudentFormPage() {
   const [declaration, setDeclaration]   = useState({ name: '', date: '', signature: '' });
   const [officer, setOfficer]           = useState({ name: '', designation: '', signature: '', date: '' });
   const [approval, setApproval]         = useState({ status: 'Pending', remarks: '', officer: '', date: '', signature: '' });
-  const [openSections, setOpenSections] = useState(() => ({
-    0: true,
-    2: location.state?.openSection === 2,
-    3: false,
-    4: false,
-    5: false,
-    6: false,
-  }));
+  const [openSections, setOpenSections] = useState(() => (
+    sectionStatesByHistoryKey.get(location.key) || {
+      0: true,
+      2: location.state?.openSection === 2,
+      3: false,
+      4: false,
+      5: false,
+      6: false,
+    }
+  ));
   const [draftId] = useState(() => location.state?.recordId || generateId());
+
+  useEffect(() => {
+    sectionStatesByHistoryKey.set(location.key, openSections);
+  }, [location.key, openSections]);
 
   // Load existing record on edit
   useEffect(() => {
@@ -96,7 +104,11 @@ export default function StudentFormPage() {
     }
   }, [id, isEdit]);
 
-  const toggleSection = (idx) => setOpenSections(prev => ({ ...prev, [idx]: !prev[idx] }));
+  const toggleSection = (idx) => setOpenSections(prev => {
+    const next = { ...prev, [idx]: !prev[idx] };
+    sectionStatesByHistoryKey.set(location.key, next);
+    return next;
+  });
 
   const onSave = (data) => {
     const existingStudent = isEdit ? findStudent(id) : null;

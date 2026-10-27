@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getStage1Verification, saveStage1Verification } from '../utils/localStorage';
@@ -8,6 +8,7 @@ const VERIFICATION_ITEM_KEY = 'applicationFormPresent';
 const EMPTY_VERIFICATION = { status: '' };
 
 export default function Stage1VerificationPage() {
+  const location = useLocation();
   const navigate = useNavigate();
   const { showToast } = useApp();
   const [verification, setVerification] = useState(
@@ -35,7 +36,15 @@ export default function Stage1VerificationPage() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => navigate('/students/new', { state: { openSection: 2 } })}
+            onClick={() => {
+              if (location.state?.returnToKey) {
+                navigate(-1);
+                return;
+              }
+              navigate(location.state?.returnTo || '/students/new', {
+                state: { recordId: location.state?.recordId, openSection: 2 },
+              });
+            }}
             className="btn-secondary btn-sm"
           >
             <ArrowLeft size={13} /> Back

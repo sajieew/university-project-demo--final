@@ -91,6 +91,11 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
   };
 
   const handleBack = () => {
+    if (location.state?.returnToKey) {
+      navigate(-1);
+      return;
+    }
+
     navigate(location.state?.returnTo || '/students/new', {
       state: { recordId: studentId, openSection: 2 },
     });
