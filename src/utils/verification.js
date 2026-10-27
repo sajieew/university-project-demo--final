@@ -40,6 +40,14 @@ export function getStageVerification(stageId, studentId) {
   return getStudentStageVerification(studentId, id);
 }
 
+export function getPendingVerificationItems(stageId, studentId) {
+  const id = String(stageId);
+  const verification = getStageVerification(id, studentId);
+  return (VERIFICATION_ITEMS[id] || []).filter(item =>
+    !item.optional && getAnswer(id, item, verification) !== 'Yes'
+  );
+}
+
 function getAnswer(stageId, item, verification) {
   if (stageId === '1') return verification.applicationFormPresent?.status;
   return verification[item.id];

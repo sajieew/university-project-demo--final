@@ -4,6 +4,7 @@ import { ArrowLeft, Save } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getStage2Verification, saveStage2Verification } from '../utils/localStorage';
 import { VERIFICATION_ITEMS, getStageProgress } from '../utils/verification';
+import useVerificationItemFocus from '../hooks/useVerificationItemFocus';
 
 const CERTIFICATES = VERIFICATION_ITEMS[2];
 const EMPTY_VERIFICATION = Object.fromEntries(CERTIFICATES.map(({ id }) => [id, '']));
@@ -13,6 +14,7 @@ export default function Stage2VerificationPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { showToast } = useApp();
+  useVerificationItemFocus(location.state?.focusItem);
   const [verification, setVerification] = useState(() => ({
     ...EMPTY_VERIFICATION,
     ...getStage2Verification(studentId),
@@ -108,6 +110,7 @@ export default function Stage2VerificationPage() {
               {CERTIFICATES.map(({ id, label }, index) => (
                 <tr
                   key={id}
+                  id={`verification-item-${id}`}
                   className={
                     verification[id] === 'Yes'
                       ? 'bg-emerald-50/60'

@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { seedDemoData, seedDummyAdmissions } from './utils/demoData';
 
 import AppLayout from './components/layout/AppLayout';
@@ -89,7 +90,9 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <AppProvider>
-          <AppRoutes />
+          <ThemeProvider>
+            <AppRoutes />
+          </ThemeProvider>
         </AppProvider>
       </AuthProvider>
     </BrowserRouter>

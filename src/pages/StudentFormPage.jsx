@@ -3,7 +3,11 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useForm, FormProvider } from 'react-hook-form';
 import { Save, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { findStudent, normalizeVerificationStages } from '../utils/localStorage';
+import {
+  ADMISSION_DRAFT_UPDATED_EVENT,
+  findStudent,
+  normalizeVerificationStages,
+} from '../utils/localStorage';
 import { generateId } from '../utils/validation';
 import { VERIFICATION_STAGES, ELIGIBILITY_PARAMETERS } from '../utils/demoData';
 import { getSavedStageStatus } from '../utils/verification';
@@ -42,16 +46,26 @@ export default function StudentFormPage() {
   const navigate = useNavigate();
   const { createStudent, editStudent } = useApp();
 
-  const methods = useForm({ mode: 'onBlur' });
-  const { setValue, getValues, handleSubmit } = methods;
+  const formDraftStorageKey = `admission-form-draft-${location.key}`;
+  const [formDraft] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem(formDraftStorageKey);
+      return saved ? JSON.parse(saved) : null;
+    } catch (error) {
+      console.error('Unable to load admission form draft.', error);
+      return null;
+    }
+  });
+  const methods = useForm({ mode: 'onBlur', defaultValues: formDraft?.formValues || {} });
+  const { setValue, getValues, handleSubmit, subscribe } = methods;
 
-  const [stages, setStages]             = useState(makeStages());
-  const [eligibility, setEligibility]   = useState(makeEligibility());
-  const [declaration, setDeclaration]   = useState({ name: '', date: '', signature: '' });
-  const [officer, setOfficer]           = useState({ name: '', designation: '', signature: '', date: '' });
-  const [approval, setApproval]         = useState({ status: 'Pending', remarks: '', officer: '', date: '', signature: '' });
+  const [stages, setStages]             = useState(() => formDraft?.stages || makeStages());
+  const [eligibility, setEligibility]   = useState(() => formDraft?.eligibility || makeEligibility());
+  const [declaration, setDeclaration]   = useState(() => formDraft?.declaration || { name: '', date: '', signature: '' });
+  const [officer, setOfficer]           = useState(() => formDraft?.officer || { name: '', designation: '', signature: '', date: '' });
+  const [approval, setApproval]         = useState(() => formDraft?.approval || { status: 'Pending', remarks: '', officer: '', date: '', signature: '' });
   const [openSections, setOpenSections] = useState(() => (
-    sectionStatesByHistoryKey.get(location.key) || {
+    sectionStatesByHistoryKey.get(location.key) || formDraft?.openSections || {
       0: true,
       2: location.state?.openSection === 2,
       3: false,
@@ -73,6 +87,7 @@ export default function StudentFormPage() {
   useEffect(() => {
     if (!isEdit) {
       sessionStorage.setItem(draftIdStorageKey(location.key), draftId);
+      window.dispatchEvent(new Event(ADMISSION_DRAFT_UPDATED_EVENT));
     }
   }, [draftId, isEdit, location.key]);
 
@@ -108,13 +123,52 @@ export default function StudentFormPage() {
       setValue('fg', s.fg || '');
       setValue('afw', s.afw || '');
 
-      setStages(normalizeVerificationStages(s.stages || makeStages()));
-      setEligibility(s.eligibility || makeEligibility());
-      setDeclaration(s.declaration || { name: '', date: '', signature: '' });
-      setOfficer(s.officer || { name: '', designation: '', signature: '', date: '' });
-      setApproval(s.approval || { status: 'Pending', remarks: '', officer: '', date: '', signature: '' });
+      if (formDraft?.formValues) {
+        Object.entries(formDraft.formValues).forEach(([field, value]) => setValue(field, value));
+      }
+
+      setStages(formDraft?.stages || normalizeVerificationStages(s.stages || makeStages()));
+      setEligibility(formDraft?.eligibility || s.eligibility || makeEligibility());
+      setDeclaration(formDraft?.declaration || s.declaration || { name: '', date: '', signature: '' });
+      setOfficer(formDraft?.officer || s.officer || { name: '', designation: '', signature: '', date: '' });
+      setApproval(formDraft?.approval || s.approval || { status: 'Pending', remarks: '', officer: '', date: '', signature: '' });
     }
-  }, [id, isEdit]);
+  }, [formDraft, id, isEdit, navigate, setValue]);
+
+  useEffect(() => {
+    const saveDraft = (formValues = getValues()) => {
+      try {
+        sessionStorage.setItem(formDraftStorageKey, JSON.stringify({
+          formValues,
+          stages,
+          eligibility,
+          declaration,
+          officer,
+          approval,
+          openSections,
+        }));
+      } catch (error) {
+        console.error('Unable to preserve admission form draft.', error);
+      }
+    };
+
+    const unsubscribe = subscribe({
+      formState: { values: true },
+      callback: ({ values }) => saveDraft(values),
+    });
+    saveDraft();
+    return unsubscribe;
+  }, [
+    approval,
+    declaration,
+    eligibility,
+    formDraftStorageKey,
+    getValues,
+    officer,
+    openSections,
+    stages,
+    subscribe,
+  ]);
 
   const toggleSection = (idx) => setOpenSections(prev => {
     const next = { ...prev, [idx]: !prev[idx] };
@@ -171,6 +225,12 @@ export default function StudentFormPage() {
       editStudent(id, record);
     } else {
       createStudent(record);
+    }
+    try {
+      sessionStorage.removeItem(formDraftStorageKey);
+      sessionStorage.removeItem(draftIdStorageKey(location.key));
+    } catch (error) {
+      console.error('Unable to clear saved admission form draft.', error);
     }
     navigate('/students');
   };

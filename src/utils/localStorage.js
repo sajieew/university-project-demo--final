@@ -7,6 +7,15 @@ export const KEYS = {
   STAGE1_VERIFICATION: 'uniportal_stage1_verification',
 };
 
+export const VERIFICATION_UPDATED_EVENT = 'uniportal-verification-updated';
+export const ADMISSION_DRAFT_UPDATED_EVENT = 'uniportal-admission-draft-updated';
+
+const notifyVerificationUpdated = () => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(VERIFICATION_UPDATED_EVENT));
+  }
+};
+
 // Generic helpers
 export const getItem = (key) => {
   try {
@@ -121,16 +130,20 @@ export const getStage1Verification = (studentId) => {
     || getItem(KEYS.STAGE1_VERIFICATION)
     || {};
 };
-export const saveStage1Verification = (verification, studentId) =>
+export const saveStage1Verification = (verification, studentId) => {
   localStorage.setItem(
     studentId ? studentStage1VerificationKey(studentId) : KEYS.STAGE1_VERIFICATION,
     JSON.stringify(verification)
   );
+  notifyVerificationUpdated();
+};
 
 export const getStage2Verification = (studentId) =>
   getItem(`uniportal_stage2_verification_${studentId}`) || {};
-export const saveStage2Verification = (studentId, verification) =>
+export const saveStage2Verification = (studentId, verification) => {
   localStorage.setItem(`uniportal_stage2_verification_${studentId}`, JSON.stringify(verification));
+  notifyVerificationUpdated();
+};
 
 const LEGACY_STAGE_IDS = { 5: 7, 6: 8, 7: 9 };
 const PREVIOUS_STAGE_IDS = { 4: 5, 5: 6, 6: 7 };
@@ -158,8 +171,10 @@ export const getStudentStageVerification = (studentId, stageId) => {
     : {};
 };
 
-export const saveStudentStageVerification = (studentId, stageId, verification) =>
+export const saveStudentStageVerification = (studentId, stageId, verification) => {
   localStorage.setItem(
     studentStageVerificationKey(studentId, stageId),
     JSON.stringify(verification)
   );
+  notifyVerificationUpdated();
+};

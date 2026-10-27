@@ -4,6 +4,7 @@ import { ArrowLeft, Save } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getStage1Verification, saveStage1Verification } from '../utils/localStorage';
 import { VERIFICATION_ITEMS } from '../utils/verification';
+import useVerificationItemFocus from '../hooks/useVerificationItemFocus';
 
 const VERIFICATION_ITEM_KEY = VERIFICATION_ITEMS[1][0].id;
 const EMPTY_VERIFICATION = { status: '' };
@@ -12,6 +13,7 @@ export default function Stage1VerificationPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { showToast } = useApp();
+  useVerificationItemFocus(location.state?.focusItem);
   const [verification, setVerification] = useState(
     () => getStage1Verification(location.state?.recordId)[VERIFICATION_ITEM_KEY] || EMPTY_VERIFICATION
   );
@@ -107,6 +109,7 @@ export default function Stage1VerificationPage() {
             </thead>
             <tbody className="divide-y divide-slate-50">
               <tr
+                id={`verification-item-${VERIFICATION_ITEM_KEY}`}
                 className={
                   verification.status === 'Yes'
                     ? 'bg-emerald-50/60'

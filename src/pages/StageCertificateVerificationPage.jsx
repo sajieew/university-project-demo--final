@@ -7,6 +7,7 @@ import {
   saveStudentStageVerification,
 } from '../utils/localStorage';
 import { VERIFICATION_ITEMS, getStageProgress } from '../utils/verification';
+import useVerificationItemFocus from '../hooks/useVerificationItemFocus';
 
 const STAGE_CONFIG = {
   3: {
@@ -34,6 +35,7 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { showToast } = useApp();
+  useVerificationItemFocus(location.state?.focusItem);
   const [verification, setVerification] = useState(() => {
     if (!stage) return {};
     return {
@@ -158,6 +160,7 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
               {stage.items.map(({ id, label, optional }, index) => (
                 <tr
                   key={id}
+                  id={`verification-item-${id}`}
                   className={
                     verification[id] === 'Yes'
                       ? 'bg-emerald-50/60'
