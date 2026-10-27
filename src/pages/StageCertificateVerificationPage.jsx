@@ -6,37 +6,24 @@ import {
   getStudentStageVerification,
   saveStudentStageVerification,
 } from '../utils/localStorage';
+import { VERIFICATION_ITEMS, getStageProgress } from '../utils/verification';
 
 const STAGE_CONFIG = {
   3: {
     title: 'Original Certificate Verification',
-    items: [
-      { id: 'birthCertificate', label: 'Birth Certificate Present?' },
-      { id: 'aadhaarCard', label: 'Aadhaar Card Present?' },
-      { id: 'incomeCertificate', label: 'Income Certificate Present?' },
-      { id: 'nativityCertificate', label: 'Nativity Certificate Present?' },
-      { id: 'communityCertificate', label: 'Community Certificate Present?' },
-    ],
+    items: VERIFICATION_ITEMS[3],
   },
   4: {
     title: 'Transfer Certificate Verification',
-    items: [
-      { id: 'transferCertificate', label: 'Transfer Certificate Present?' },
-      { id: 'nriCertificate', label: 'NRI Certificate Present?', optional: true },
-      { id: 'migrationCertificate', label: 'Migration Certificate Present?', optional: true },
-    ],
+    items: VERIFICATION_ITEMS[4],
   },
   5: {
     title: 'Payment Verification',
-    items: [
-      { id: 'paymentDoneCertificate', label: 'Payment Done Certificate Present?' },
-    ],
+    items: VERIFICATION_ITEMS[5],
   },
   6: {
     title: 'Approval Certificate Verification',
-    items: [
-      { id: 'approvalCertificate', label: 'Approval Certificate Present?' },
-    ],
+    items: VERIFICATION_ITEMS[6],
   },
 };
 
@@ -70,15 +57,26 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
     );
   }
 
-  const compulsoryItems = stage.items.filter(item => !item.optional);
-  const completedCount = compulsoryItems.filter(item =>
-    verification[item.id] === 'Yes' || verification[item.id] === 'No'
-  ).length;
+  const { completedCount, totalCount, percentage: progress } =
+    getStageProgress(stageId, verification);
   const optionalItems = stage.items.filter(item => item.optional);
   const optionalDecisionsCount = optionalItems.filter(item =>
     verification[item.id] === 'Yes' || verification[item.id] === 'No'
   ).length;
-  const progress = Math.round((completedCount / compulsoryItems.length) * 100);
+
+  const handleChange = (id, status, checked) => {
+    const nextVerification = {
+      ...verification,
+      [id]: checked ? status : '',
+    };
+    setVerification(nextVerification);
+    try {
+      saveStudentStageVerification(studentId, stageId, nextVerification);
+    } catch (error) {
+      console.error(`Stage ${stageId} verification save error`, error);
+      showToast('Unable to save verification. Please check browser storage and try again.', 'error');
+    }
+  };
 
   const handleSave = () => {
     try {
@@ -122,9 +120,9 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
 
       <section className="card p-5" aria-label="Verification progress">
         <div className="flex items-center justify-between gap-3 mb-2">
-          <p className="text-sm font-semibold text-slate-700">Compulsory verification decisions completed</p>
+          <p className="text-sm font-semibold text-slate-700">Compulsory items verified Yes</p>
           <p className="text-sm font-semibold text-emerald-700">
-            {completedCount} of {compulsoryItems.length} ({progress}%)
+            {completedCount} of {totalCount} ({progress}%)
           </p>
         </div>
         <div
@@ -132,7 +130,7 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
           role="progressbar"
           aria-label="Compulsory verification decisions completed"
           aria-valuemin={0}
-          aria-valuemax={compulsoryItems.length}
+          aria-valuemax={totalCount}
           aria-valuenow={completedCount}
         >
           <div className="h-full bg-emerald-500 transition-all" style={{ width: `${progress}%` }} />
@@ -141,7 +139,7 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
           {stageId === '4' && optionalItems.length > 0
             ? `Optional decisions recorded: ${optionalDecisionsCount} of ${optionalItems.length}. `
             : ''}
-          A decision is complete when Yes or No is selected; Yes means present and No means absent.
+          A compulsory item is complete only when Yes is selected. No or unanswered items remain pending.
         </p>
       </section>
 
@@ -183,10 +181,7 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
                         <input
                           type="checkbox"
                           checked={verification[id] === status}
-                          onChange={event => setVerification(previous => ({
-                            ...previous,
-                            [id]: event.target.checked ? status : '',
-                          }))}
+                          onChange={event => handleChange(id, status, event.target.checked)}
                           aria-label={`${status}: ${label}`}
                           className={`h-4 w-4 rounded focus:ring-2 ${
                             status === 'Yes'

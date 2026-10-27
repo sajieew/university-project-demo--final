@@ -88,7 +88,9 @@ export default function DashboardPage() {
               { label: 'Generate Reports',       icon: <BarChart3 size={15} />, path: '/reports',     color: 'text-emerald-700 bg-emerald-50' },
               { label: 'View Flowchart',          icon: <GitBranch size={15} />, path: '/flowchart',        color: 'text-violet-700 bg-violet-50' },
               { label: 'Admission Forms',         icon: <FileText size={15} />,  path: '/admission-forms',  color: 'text-teal-700 bg-teal-50' },
-            ].map(action => (
+            ].filter(action =>
+              user?.role !== 'Faculty' || !['/reports', '/flowchart'].includes(action.path)
+            ).map(action => (
               <button
                 key={action.path}
                 onClick={() => navigate(action.path)}

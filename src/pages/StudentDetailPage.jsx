@@ -2,6 +2,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Pencil, FileDown, Printer, Trash2, CheckCircle, Clock, Minus } from 'lucide-react';
 import { findStudent, normalizeVerificationStages } from '../utils/localStorage';
+import { getSavedStageStatus } from '../utils/verification';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/ui/StatusBadge';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
@@ -14,7 +15,7 @@ const signatureLabel = (signature) =>
 
 const STAGE_ICONS = {
   Completed: <CheckCircle size={16} className="text-emerald-500" />,
-  Pending:   <Clock size={16} className="text-amber-500" />,
+  Pending:   <Clock size={16} className="text-red-500" />,
   NA:        <Minus size={16} className="text-slate-400" />,
 };
 
@@ -43,6 +44,12 @@ export default function StudentDetailPage() {
   if (!student) return null;
 
   const stages = normalizeVerificationStages(student.stages);
+  const stageStatuses = VERIFICATION_STAGES.map(stage =>
+    getSavedStageStatus(stage.id, student.id)
+  );
+  const verificationStatus = stageStatuses.every(status => status === 'Completed')
+    ? 'Verified'
+    : 'Pending';
 
   const handleDelete = () => {
     removeStudent(student.id);
@@ -91,7 +98,7 @@ export default function StudentDetailPage() {
 
       {/* Status badges */}
       <div className="flex flex-wrap gap-2 no-print">
-        <StatusBadge status={student.verificationStatus} />
+        <StatusBadge status={verificationStatus} />
         <StatusBadge status={student.admissionStatus} />
       </div>
 
@@ -119,9 +126,10 @@ export default function StudentDetailPage() {
         <div className="space-y-3">
           {VERIFICATION_STAGES.map(stage => {
             const s = stages[stage.id] || { status: 'Pending' };
+            const status = getSavedStageStatus(stage.id, student.id);
             return (
               <div key={stage.id} className="flex items-start gap-4 py-2 border-b border-slate-50 last:border-0">
-                <div className="flex-shrink-0 mt-0.5">{STAGE_ICONS[s.status] || STAGE_ICONS.Pending}</div>
+                <div className="flex-shrink-0 mt-0.5">{STAGE_ICONS[status] || STAGE_ICONS.Pending}</div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-slate-700">{stage.id}. {stage.name}</p>
                   <div className="flex flex-wrap gap-x-6 gap-y-0.5 mt-1">
@@ -130,7 +138,13 @@ export default function StudentDetailPage() {
                     {s.remarks && <span className="text-xs text-slate-400">Remarks: {s.remarks}</span>}
                   </div>
                 </div>
-                <StatusBadge status={s.status} />
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                  status === 'Completed'
+                    ? 'bg-emerald-50 text-emerald-700'
+                    : 'bg-red-50 text-red-700'
+                }`}>
+                  {status}
+                </span>
               </div>
             );
           })}

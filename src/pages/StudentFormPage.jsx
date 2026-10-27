@@ -6,6 +6,7 @@ import { useApp } from '../context/AppContext';
 import { findStudent, normalizeVerificationStages } from '../utils/localStorage';
 import { generateId } from '../utils/validation';
 import { VERIFICATION_STAGES, ELIGIBILITY_PARAMETERS } from '../utils/demoData';
+import { getSavedStageStatus } from '../utils/verification';
 
 import StudentDetailsForm from '../components/forms/StudentDetailsForm';
 import VerificationStepper from '../components/forms/VerificationStepper';
@@ -32,6 +33,7 @@ const SECTIONS = [
 ];
 
 const sectionStatesByHistoryKey = new Map();
+const draftIdStorageKey = (historyKey) => `admission-draft-id-${historyKey}`;
 
 export default function StudentFormPage() {
   const { id } = useParams();
@@ -58,11 +60,21 @@ export default function StudentFormPage() {
       6: false,
     }
   ));
-  const [draftId] = useState(() => location.state?.recordId || generateId());
+  const [draftId] = useState(() =>
+    location.state?.recordId
+    || sessionStorage.getItem(draftIdStorageKey(location.key))
+    || generateId()
+  );
 
   useEffect(() => {
     sectionStatesByHistoryKey.set(location.key, openSections);
   }, [location.key, openSections]);
+
+  useEffect(() => {
+    if (!isEdit) {
+      sessionStorage.setItem(draftIdStorageKey(location.key), draftId);
+    }
+  }, [draftId, isEdit, location.key]);
 
   // Load existing record on edit
   useEffect(() => {
@@ -112,7 +124,16 @@ export default function StudentFormPage() {
 
   const onSave = (data) => {
     const existingStudent = isEdit ? findStudent(id) : null;
-    const allVerified = Object.values(stages).every(s => s.status === 'Completed' || s.status === 'NA');
+    const savedStages = Object.fromEntries(VERIFICATION_STAGES.map(stage => [
+      stage.id,
+      {
+        ...(stages[stage.id] || {}),
+        status: getSavedStageStatus(stage.id, isEdit ? id : draftId),
+      },
+    ]));
+    const allVerified = VERIFICATION_STAGES.every(stage =>
+      savedStages[stage.id].status === 'Completed'
+    );
     const verificationStatus = allVerified ? 'Verified' : 'Pending';
 
     // Auto-calculate totals from subject marks
@@ -135,7 +156,7 @@ export default function StudentFormPage() {
       chemObt, chemMax,
       totalObt, totalMax, percentage,
       ...(isEdit && existingStudent ? { certificates: existingStudent.certificates } : {}),
-      stages,
+      stages: savedStages,
       eligibility,
       declaration,
       officer,

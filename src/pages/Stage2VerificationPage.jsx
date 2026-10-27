@@ -3,13 +3,9 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getStage2Verification, saveStage2Verification } from '../utils/localStorage';
+import { VERIFICATION_ITEMS, getStageProgress } from '../utils/verification';
 
-const CERTIFICATES = [
-  { id: 'tenthMarkCertificate', label: '10th Mark Certificate Present?' },
-  { id: 'eleventhMarkCertificate', label: '11th Mark Certificate Present?' },
-  { id: 'twelfthMarkCertificate', label: '12th Mark Certificate Present?' },
-];
-
+const CERTIFICATES = VERIFICATION_ITEMS[2];
 const EMPTY_VERIFICATION = Object.fromEntries(CERTIFICATES.map(({ id }) => [id, '']));
 
 export default function Stage2VerificationPage() {
@@ -21,8 +17,22 @@ export default function Stage2VerificationPage() {
     ...EMPTY_VERIFICATION,
     ...getStage2Verification(studentId),
   }));
-  const verifiedCount = CERTIFICATES.filter(({ id }) => verification[id] === 'Yes').length;
-  const progress = Math.round((verifiedCount / CERTIFICATES.length) * 100);
+  const { completedCount: verifiedCount, totalCount, percentage: progress } =
+    getStageProgress(2, verification);
+
+  const handleChange = (id, status, checked) => {
+    const nextVerification = {
+      ...verification,
+      [id]: checked ? status : '',
+    };
+    setVerification(nextVerification);
+    try {
+      saveStage2Verification(studentId, nextVerification);
+    } catch (error) {
+      console.error('Stage 2 verification save error', error);
+      showToast('Unable to save Stage 2 verification. Please check browser storage and try again.', 'error');
+    }
+  };
 
   const handleSave = () => {
     try {
@@ -68,7 +78,7 @@ export default function Stage2VerificationPage() {
         <div className="flex items-center justify-between gap-3 mb-2">
           <p className="text-sm font-semibold text-slate-700">Certificates verified</p>
           <p className="text-sm font-semibold text-emerald-700">
-            {verifiedCount} of {CERTIFICATES.length} ({progress}%)
+            {verifiedCount} of {totalCount} ({progress}%)
           </p>
         </div>
         <div
@@ -76,7 +86,7 @@ export default function Stage2VerificationPage() {
           role="progressbar"
           aria-label="Certificates verified"
           aria-valuemin={0}
-          aria-valuemax={CERTIFICATES.length}
+          aria-valuemax={totalCount}
           aria-valuenow={verifiedCount}
         >
           <div className="h-full bg-emerald-500 transition-all" style={{ width: `${progress}%` }} />
@@ -114,10 +124,7 @@ export default function Stage2VerificationPage() {
                         <input
                           type="checkbox"
                           checked={verification[id] === status}
-                          onChange={event => setVerification(previous => ({
-                            ...previous,
-                            [id]: event.target.checked ? status : '',
-                          }))}
+                          onChange={event => handleChange(id, status, event.target.checked)}
                           aria-label={`${status}: ${label}`}
                           className={`h-4 w-4 rounded focus:ring-2 ${
                             status === 'Yes'

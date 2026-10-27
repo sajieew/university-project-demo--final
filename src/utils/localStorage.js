@@ -112,9 +112,20 @@ export const getAuth = () => getItem(KEYS.AUTH);
 export const setAuth = (auth) => setItem(KEYS.AUTH, auth);
 export const clearAuth = () => localStorage.removeItem(KEYS.AUTH);
 
-export const getStage1Verification = () => getItem(KEYS.STAGE1_VERIFICATION) || {};
-export const saveStage1Verification = (verification) =>
-  localStorage.setItem(KEYS.STAGE1_VERIFICATION, JSON.stringify(verification));
+const studentStage1VerificationKey = (studentId) =>
+  `uniportal_stage1_verification_${studentId}`;
+
+export const getStage1Verification = (studentId) => {
+  if (!studentId) return getItem(KEYS.STAGE1_VERIFICATION) || {};
+  return getItem(studentStage1VerificationKey(studentId))
+    || getItem(KEYS.STAGE1_VERIFICATION)
+    || {};
+};
+export const saveStage1Verification = (verification, studentId) =>
+  localStorage.setItem(
+    studentId ? studentStage1VerificationKey(studentId) : KEYS.STAGE1_VERIFICATION,
+    JSON.stringify(verification)
+  );
 
 export const getStage2Verification = (studentId) =>
   getItem(`uniportal_stage2_verification_${studentId}`) || {};

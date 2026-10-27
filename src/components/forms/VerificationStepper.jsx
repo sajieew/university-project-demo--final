@@ -1,13 +1,11 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Check, Clock, Minus } from 'lucide-react';
+import { Check, Clock } from 'lucide-react';
 import { VERIFICATION_STAGES } from '../../utils/demoData';
-
-const STATUS_OPTIONS = ['Pending', 'Completed', 'NA'];
+import { getSavedStageStatus } from '../../utils/verification';
 
 const STATUS_STYLES = {
-  Completed: { dot: 'bg-emerald-500 border-emerald-500', text: 'text-emerald-700', icon: <Check size={12} className="text-white" /> },
-  Pending:   { dot: 'bg-amber-400 border-amber-400',  text: 'text-amber-700',  icon: <Clock size={12} className="text-white" /> },
-  NA:        { dot: 'bg-slate-300 border-slate-300',  text: 'text-slate-500',  icon: <Minus size={12} className="text-white" /> },
+  Completed: { dot: 'bg-emerald-500 border-emerald-500', badge: 'bg-emerald-50 text-emerald-700', icon: <Check size={12} className="text-white" /> },
+  Pending:   { dot: 'bg-red-500 border-red-500', badge: 'bg-red-50 text-red-700', icon: <Clock size={12} className="text-white" /> },
 };
 
 export default function VerificationStepper({ stages, onChange, recordId, isEdit }) {
@@ -23,7 +21,8 @@ export default function VerificationStepper({ stages, onChange, recordId, isEdit
       <div className="space-y-4">
         {VERIFICATION_STAGES.map(stage => {
           const s = stages[stage.id] || { status: 'Pending', verifiedBy: '', date: '', remarks: '' };
-          const st = STATUS_STYLES[s.status] || STATUS_STYLES.Pending;
+          const status = getSavedStageStatus(stage.id, recordId);
+          const st = STATUS_STYLES[status];
 
           return (
             <div key={stage.id} className="border border-slate-200 rounded-xl overflow-hidden">
@@ -74,25 +73,10 @@ export default function VerificationStepper({ stages, onChange, recordId, isEdit
                         Stage {stage.id} — {stage.name}
                       </Link>
                     )}
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${st.badge}`}>
+                      {status}
+                    </span>
                   </div>
-                </div>
-                <div className="flex gap-1">
-                  {STATUS_OPTIONS.map(opt => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => update(stage.id, 'status', opt)}
-                      className={`px-2.5 py-1 text-xs font-medium rounded-md border transition-colors ${
-                        s.status === opt
-                          ? opt === 'Completed' ? 'bg-emerald-600 text-white border-emerald-600'
-                          : opt === 'NA'        ? 'bg-slate-400 text-white border-slate-400'
-                                                : 'bg-amber-500 text-white border-amber-500'
-                          : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      {opt}
-                    </button>
-                  ))}
                 </div>
               </div>
 

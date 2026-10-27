@@ -3,8 +3,9 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getStage1Verification, saveStage1Verification } from '../utils/localStorage';
+import { VERIFICATION_ITEMS } from '../utils/verification';
 
-const VERIFICATION_ITEM_KEY = 'applicationFormPresent';
+const VERIFICATION_ITEM_KEY = VERIFICATION_ITEMS[1][0].id;
 const EMPTY_VERIFICATION = { status: '' };
 
 export default function Stage1VerificationPage() {
@@ -12,17 +13,31 @@ export default function Stage1VerificationPage() {
   const navigate = useNavigate();
   const { showToast } = useApp();
   const [verification, setVerification] = useState(
-    () => getStage1Verification()[VERIFICATION_ITEM_KEY] || EMPTY_VERIFICATION
+    () => getStage1Verification(location.state?.recordId)[VERIFICATION_ITEM_KEY] || EMPTY_VERIFICATION
   );
   const verifiedCount = verification.status === 'Yes' ? 1 : 0;
   const progress = verifiedCount * 100;
 
+  const handleChange = (status) => {
+    const nextVerification = { status };
+    setVerification(nextVerification);
+    try {
+      saveStage1Verification({
+        ...getStage1Verification(location.state?.recordId),
+        [VERIFICATION_ITEM_KEY]: nextVerification,
+      }, location.state?.recordId);
+    } catch (error) {
+      console.error('Stage 1 verification save error', error);
+      showToast('Unable to save Stage 1 verification. Please check browser storage and try again.', 'error');
+    }
+  };
+
   const handleSave = () => {
     try {
       saveStage1Verification({
-        ...getStage1Verification(),
+        ...getStage1Verification(location.state?.recordId),
         [VERIFICATION_ITEM_KEY]: verification,
-      });
+      }, location.state?.recordId);
       showToast('Stage 1 verification saved successfully.', 'success');
     } catch (error) {
       console.error('Stage 1 verification save error', error);
@@ -108,7 +123,7 @@ export default function Stage1VerificationPage() {
                       <input
                         type="checkbox"
                         checked={verification.status === status}
-                        onChange={event => setVerification({ status: event.target.checked ? status : '' })}
+                        onChange={event => handleChange(event.target.checked ? status : '')}
                         aria-label={`${status}: Application Form Present?`}
                         className={`h-4 w-4 rounded focus:ring-2 ${
                           status === 'Yes'

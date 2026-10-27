@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { BarChart3, Download, Printer } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import AdmissionFormsPage from './AdmissionFormsPage';
 
 const PROGRAMMES = ['B.E.', 'B.Tech.', 'M.E.', 'M.Tech.', 'MCA', 'MBA'];
 const COLORS = ['bg-blue-500', 'bg-emerald-500', 'bg-violet-500', 'bg-amber-500', 'bg-rose-500', 'bg-teal-500'];
@@ -165,6 +166,8 @@ export default function ReportsPage() {
           </div>
         </div>
       </div>
+
+      <AdmissionFormsPage />
     </div>
   );
 }

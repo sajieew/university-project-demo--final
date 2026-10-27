@@ -10,8 +10,8 @@ const NAV_ITEMS = [
   { to: '/students',     icon: <Users size={18} />,           label: 'Student Records',  roles: ['Admin', 'Faculty'] },
   { to: '/students/new', icon: <UserPlus size={18} />,        label: 'New Admission',    roles: ['Admin', 'Faculty'] },
   { to: '/verify',       icon: <CheckSquare size={18} />,     label: 'Verification',     roles: ['Admin', 'Faculty'] },
-  { to: '/admission-forms', icon: <FileText size={18} />,     label: 'Admission Forms',  roles: ['Admin', 'Faculty'] },
   { to: '/reports',      icon: <BarChart3 size={18} />,       label: 'Reports',          roles: ['Admin'] },
+  { to: '/admission-forms', icon: <FileText size={18} />,     label: 'Admission Forms',  roles: ['Admin', 'Faculty'] },
   { to: '/users',        icon: <Users size={18} />,           label: 'Users',            roles: ['Admin'] },
   { to: '/settings',     icon: <Settings size={18} />,        label: 'Settings',         roles: ['Admin'] },
 ];
