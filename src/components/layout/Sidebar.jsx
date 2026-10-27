@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, UserPlus, CheckSquare,
-  BarChart3, Settings, LogOut, GraduationCap, ChevronLeft, ChevronRight, Shield, User, GitBranch, FileText
+  BarChart3, Settings, LogOut, GraduationCap, ChevronLeft, ChevronRight, Shield, User, FileText
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -14,7 +14,6 @@ const NAV_ITEMS = [
   { to: '/reports',      icon: <BarChart3 size={18} />,       label: 'Reports',          roles: ['Admin'] },
   { to: '/users',        icon: <Users size={18} />,           label: 'Users',            roles: ['Admin'] },
   { to: '/settings',     icon: <Settings size={18} />,        label: 'Settings',         roles: ['Admin'] },
-  { to: '/flowchart',    icon: <GitBranch size={18} />,       label: 'Flowchart',        roles: ['Admin', 'Faculty'] },
 ];
 
 export default function Sidebar({ collapsed, onToggle }) {
