@@ -5,20 +5,14 @@ import { Save, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { findStudent, normalizeVerificationStages } from '../utils/localStorage';
 import { generateId } from '../utils/validation';
-import { UG_CERTIFICATES, PG_CERTIFICATES, VERIFICATION_STAGES, ELIGIBILITY_PARAMETERS } from '../utils/demoData';
+import { VERIFICATION_STAGES, ELIGIBILITY_PARAMETERS } from '../utils/demoData';
 
 import StudentDetailsForm from '../components/forms/StudentDetailsForm';
-import CertificateChecklist from '../components/forms/CertificateChecklist';
 import VerificationStepper from '../components/forms/VerificationStepper';
 import EligibilityForm from '../components/forms/EligibilityForm';
 import DeclarationSection from '../components/forms/DeclarationSection';
 import VerificationOfficerForm from '../components/forms/VerificationOfficerForm';
 import AdmissionApprovalForm from '../components/forms/AdmissionApprovalForm';
-
-const isUG = (p) => ['B.E.', 'B.Tech.'].includes(p);
-
-const makeCertChecklist = (list) =>
-  list.reduce((acc, cert) => { acc[cert.id] = { originalProduced: false, photocopySubmitted: false, verified: false, remarks: '' }; return acc; }, {});
 
 const makeStages = () =>
   VERIFICATION_STAGES.reduce((acc, stage) => { acc[stage.id] = { status: 'Pending', verifiedBy: '', date: '', remarks: '' }; return acc; }, {});
@@ -29,13 +23,12 @@ const makeEligibility = () => ({
 });
 
 const SECTIONS = [
-  'Student Details',
-  'Certificate Checklist',
-  'Verification Process',
-  'Eligibility',
-  'Declaration',
-  'Verification Officer',
-  'Admission Approval',
+  { index: 0, title: 'Student Details' },
+  { index: 2, title: 'Verification Process' },
+  { index: 3, title: 'Eligibility' },
+  { index: 4, title: 'Declaration' },
+  { index: 5, title: 'Verification Officer' },
+  { index: 6, title: 'Admission Approval' },
 ];
 
 export default function StudentFormPage() {
@@ -46,9 +39,8 @@ export default function StudentFormPage() {
   const { createStudent, editStudent } = useApp();
 
   const methods = useForm({ mode: 'onBlur' });
-  const { watch, setValue, getValues, handleSubmit } = methods;
+  const { setValue, getValues, handleSubmit } = methods;
 
-  const [certificates, setCertificates] = useState({});
   const [stages, setStages]             = useState(makeStages());
   const [eligibility, setEligibility]   = useState(makeEligibility());
   const [declaration, setDeclaration]   = useState({ name: '', date: '', signature: '' });
@@ -56,7 +48,6 @@ export default function StudentFormPage() {
   const [approval, setApproval]         = useState({ status: 'Pending', remarks: '', officer: '', date: '', signature: '' });
   const [openSections, setOpenSections] = useState(() => ({
     0: true,
-    1: true,
     2: location.state?.openSection === 2,
     3: false,
     4: false,
@@ -64,8 +55,6 @@ export default function StudentFormPage() {
     6: false,
   }));
   const [draftId] = useState(() => location.state?.recordId || generateId());
-
-  const programme = watch('programme');
 
   // Load existing record on edit
   useEffect(() => {
@@ -99,7 +88,6 @@ export default function StudentFormPage() {
       setValue('fg', s.fg || '');
       setValue('afw', s.afw || '');
 
-      setCertificates(s.certificates || {});
       setStages(normalizeVerificationStages(s.stages || makeStages()));
       setEligibility(s.eligibility || makeEligibility());
       setDeclaration(s.declaration || { name: '', date: '', signature: '' });
@@ -108,17 +96,10 @@ export default function StudentFormPage() {
     }
   }, [id, isEdit]);
 
-  // Init certificates when programme changes (on new form)
-  useEffect(() => {
-    if (!isEdit && programme) {
-      const list = isUG(programme) ? UG_CERTIFICATES : PG_CERTIFICATES;
-      setCertificates(makeCertChecklist(list));
-    }
-  }, [programme, isEdit]);
-
   const toggleSection = (idx) => setOpenSections(prev => ({ ...prev, [idx]: !prev[idx] }));
 
   const onSave = (data) => {
+    const existingStudent = isEdit ? findStudent(id) : null;
     const allVerified = Object.values(stages).every(s => s.status === 'Completed' || s.status === 'NA');
     const verificationStatus = allVerified ? 'Verified' : 'Pending';
 
@@ -141,7 +122,7 @@ export default function StudentFormPage() {
       physicsObt, physicsMax,
       chemObt, chemMax,
       totalObt, totalMax, percentage,
-      certificates,
+      ...(isEdit && existingStudent ? { certificates: existingStudent.certificates } : {}),
       stages,
       eligibility,
       declaration,
@@ -186,27 +167,26 @@ export default function StudentFormPage() {
 
         {/* Section accordion */}
         <div className="space-y-4">
-          {SECTIONS.map((title, idx) => (
-            <div key={idx} className="card overflow-hidden">
+          {SECTIONS.map(({ index, title }) => (
+            <div key={index} className="card overflow-hidden">
               <button
                 type="button"
-                onClick={() => toggleSection(idx)}
+                onClick={() => toggleSection(index)}
                 className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-7 h-7 rounded-full bg-blue-700 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
-                    {idx + 1}
+                    {index + 1}
                   </div>
-                  <span className="text-sm font-semibold text-slate-700">Section {String.fromCharCode(65 + idx)} — {title}</span>
+                  <span className="text-sm font-semibold text-slate-700">Section {String.fromCharCode(65 + index)} — {title}</span>
                 </div>
-                {openSections[idx] ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+                {openSections[index] ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
               </button>
 
-              {openSections[idx] && (
+              {openSections[index] && (
                 <div className="border-t border-slate-100 p-6">
-                  {idx === 0 && <StudentDetailsForm />}
-                  {idx === 1 && <CertificateChecklist programme={programme} certificates={certificates} onChange={setCertificates} />}
-                  {idx === 2 && (
+                  {index === 0 && <StudentDetailsForm />}
+                  {index === 2 && (
                     <VerificationStepper
                       stages={stages}
                       onChange={setStages}
@@ -214,22 +194,22 @@ export default function StudentFormPage() {
                       isEdit={isEdit}
                     />
                   )}
-                  {idx === 3 && <EligibilityForm eligibility={eligibility} onChange={setEligibility} />}
-                  {idx === 4 && (
+                  {index === 3 && <EligibilityForm eligibility={eligibility} onChange={setEligibility} />}
+                  {index === 4 && (
                     <DeclarationSection
                       declaration={declaration}
                       onChange={setDeclaration}
                       applicationId={isEdit ? id : draftId}
                     />
                   )}
-                  {idx === 5 && (
+                  {index === 5 && (
                     <VerificationOfficerForm
                       officer={officer}
                       onChange={setOfficer}
                       applicationId={isEdit ? id : draftId}
                     />
                   )}
-                  {idx === 6 && (
+                  {index === 6 && (
                     <AdmissionApprovalForm
                       approval={approval}
                       onChange={setApproval}

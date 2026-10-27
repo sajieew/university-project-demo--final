@@ -1,8 +1,7 @@
 import jsPDF from 'jspdf';
-import { UG_CERTIFICATES, PG_CERTIFICATES, VERIFICATION_STAGES, ELIGIBILITY_PARAMETERS } from './demoData';
+import { VERIFICATION_STAGES, ELIGIBILITY_PARAMETERS } from './demoData';
 import { normalizeVerificationStages } from './localStorage';
 
-const isUG = (p) => ['B.E.', 'B.Tech.'].includes(p);
 const signatureLabel = (signature) =>
   typeof signature === 'string' ? signature : signature?.fileName || '_______________';
 
@@ -47,27 +46,8 @@ function labelValue(doc, label, value, x, y, labelW = 55) {
   doc.text(String(value || '—'), x + labelW, y);
 }
 
-function checkMark(doc, x, y, checked) {
-  // Draw the outer square box
-  doc.setDrawColor(60, 60, 60);
-  doc.setLineWidth(0.4);
-  doc.rect(x, y - 3.2, 4, 4);
-  if (checked) {
-    // Draw a tick using two lines (vector — no Unicode dependency)
-    doc.setLineWidth(0.6);
-    doc.setDrawColor(10, 100, 10);
-    // Short leg: bottom-left corner to mid-bottom
-    doc.line(x + 0.6, y - 0.8, x + 1.5, y + 0.2);
-    // Long leg: mid-bottom up to top-right
-    doc.line(x + 1.5, y + 0.2, x + 3.4, y - 2.6);
-    doc.setDrawColor(60, 60, 60);
-    doc.setLineWidth(0.4);
-  }
-}
-
 export const generateStudentPDF = (student) => {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const certs = isUG(student.programme) ? UG_CERTIFICATES : PG_CERTIFICATES;
 
   let y = addHeader(doc, 0);
 
@@ -91,48 +71,6 @@ export const generateStudentPDF = (student) => {
   y += 7;
   labelValue(doc, 'Email ID', student.email, col1x, y);
   y += 10;
-
-  // Section B: Certificate Checklist
-  y = sectionHeader(doc, 'SECTION B — CERTIFICATE VERIFICATION CHECKLIST', y);
-  // Table header
-  doc.setFillColor(...NAVY);
-  doc.rect(14, y, 182, 6, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Certificate / Document', 17, y + 4);
-  doc.text('Original', 132, y + 4, { align: 'center' });
-  doc.text('Photocopy', 153, y + 4, { align: 'center' });
-  doc.text('Verified', 172, y + 4, { align: 'center' });
-  doc.text('Remarks', 186, y + 4);
-  y += 6;
-  doc.setTextColor(...TEXT_DARK);
-
-  certs.forEach((cert, idx) => {
-    const row = student.certificates?.[cert.id] || {};
-    if (y > 260) {
-      doc.addPage();
-      y = addHeader(doc, 0);
-    }
-    const bg = idx % 2 === 0 ? [255, 255, 255] : LIGHT_GRAY;
-    doc.setFillColor(...bg);
-    doc.rect(14, y, 182, 6, 'F');
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7);
-    doc.text(`${idx + 1}. ${cert.name}`, 17, y + 4, { maxWidth: 112 });
-    checkMark(doc, 130, y + 4, row.originalProduced);
-    checkMark(doc, 151, y + 4, row.photocopySubmitted);
-    checkMark(doc, 170, y + 4, row.verified);
-    if (row.remarks) {
-      doc.setFontSize(6.5);
-      doc.text(String(row.remarks), 182, y + 4, { maxWidth: 26 });
-      doc.setFontSize(7);
-    }
-    y += 6;
-  });
-  y += 5;
-
-  if (y > 220) { doc.addPage(); y = addHeader(doc, 0); }
 
   // Section C: Verification Process
   y = sectionHeader(doc, 'SECTION C — VERIFICATION PROCESS', y);

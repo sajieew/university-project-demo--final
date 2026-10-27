@@ -6,10 +6,9 @@ import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/ui/StatusBadge';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { downloadPDF, printPDF } from '../utils/pdfGenerator';
-import { UG_CERTIFICATES, PG_CERTIFICATES, VERIFICATION_STAGES, ELIGIBILITY_PARAMETERS } from '../utils/demoData';
+import { VERIFICATION_STAGES, ELIGIBILITY_PARAMETERS } from '../utils/demoData';
 import { formatDate } from '../utils/validation';
 
-const isUG = (p) => ['B.E.', 'B.Tech.'].includes(p);
 const signatureLabel = (signature) =>
   typeof signature === 'string' ? signature : signature?.fileName || '';
 
@@ -43,7 +42,6 @@ export default function StudentDetailPage() {
 
   if (!student) return null;
 
-  const certs = isUG(student.programme) ? UG_CERTIFICATES : PG_CERTIFICATES;
   const stages = normalizeVerificationStages(student.stages);
 
   const handleDelete = () => {
@@ -113,46 +111,6 @@ export default function StudentDetailPage() {
           <DetailRow label="Email ID"               value={student.email} />
           <DetailRow label="Academic Year"          value={student.academicYear} />
         </dl>
-      </div>
-
-      {/* Section B: Certificate Checklist */}
-      <div className="card p-6">
-        <h2 className="section-title">Section B — Certificate Verification Checklist</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50">
-                <th className="table-header w-8">#</th>
-                <th className="table-header">Certificate / Document</th>
-                <th className="table-header text-center">Original</th>
-                <th className="table-header text-center">Photocopy</th>
-                <th className="table-header text-center">Verified</th>
-                <th className="table-header">Remarks</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {certs.map((cert, idx) => {
-                const row = student.certificates?.[cert.id] || {};
-                return (
-                  <tr key={cert.id} className={idx % 2 === 0 ? '' : 'bg-slate-50/40'}>
-                    <td className="table-cell text-xs text-slate-400">{idx + 1}</td>
-                    <td className="table-cell">{cert.name}</td>
-                    <td className="table-cell text-center">
-                      {row.originalProduced ? <span className="text-emerald-600 font-bold">✓</span> : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="table-cell text-center">
-                      {row.photocopySubmitted ? <span className="text-emerald-600 font-bold">✓</span> : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="table-cell text-center">
-                      {row.verified ? <span className="text-emerald-600 font-bold">✓</span> : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="table-cell text-xs text-slate-500">{row.remarks || '—'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
       </div>
 
       {/* Section C: Verification Process */}

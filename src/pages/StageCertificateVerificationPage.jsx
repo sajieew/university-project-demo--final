@@ -19,26 +19,20 @@ const STAGE_CONFIG = {
     ],
   },
   4: {
-    title: 'Community Certificate Verification',
-    items: [
-      { id: 'communityCertificate', label: 'Community Certificate Present?' },
-    ],
-  },
-  5: {
-    title: 'Transfer and NRI Certificate Verification',
+    title: 'Transfer Certificate Verification',
     items: [
       { id: 'transferCertificate', label: 'Transfer Certificate Present?' },
       { id: 'nriCertificate', label: 'NRI Certificate Present?', optional: true },
+      { id: 'migrationCertificate', label: 'Migration Certificate Present?', optional: true },
     ],
   },
-  6: {
+  5: {
     title: 'Payment Verification',
     items: [
       { id: 'paymentDoneCertificate', label: 'Payment Done Certificate Present?' },
-      { id: 'emiSanctionedCertificate', label: 'EMI Sanctioned Certificate Present?', optional: true },
     ],
   },
-  7: {
+  6: {
     title: 'Approval Certificate Verification',
     items: [
       { id: 'approvalCertificate', label: 'Approval Certificate Present?' },
@@ -78,6 +72,10 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
 
   const compulsoryItems = stage.items.filter(item => !item.optional);
   const completedCount = compulsoryItems.filter(item =>
+    verification[item.id] === 'Yes' || verification[item.id] === 'No'
+  ).length;
+  const optionalItems = stage.items.filter(item => item.optional);
+  const optionalDecisionsCount = optionalItems.filter(item =>
     verification[item.id] === 'Yes' || verification[item.id] === 'No'
   ).length;
   const progress = Math.round((completedCount / compulsoryItems.length) * 100);
@@ -135,7 +133,10 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
           <div className="h-full bg-emerald-500 transition-all" style={{ width: `${progress}%` }} />
         </div>
         <p className="text-xs text-slate-400 mt-2">
-          A decision is complete when Yes or No is selected; No records that the certificate is not present.
+          {stageId === '4' && optionalItems.length > 0
+            ? `Optional decisions recorded: ${optionalDecisionsCount} of ${optionalItems.length}. `
+            : ''}
+          A decision is complete when Yes or No is selected; Yes means present and No means absent.
         </p>
       </section>
 

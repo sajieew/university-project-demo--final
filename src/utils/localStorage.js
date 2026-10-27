@@ -48,17 +48,27 @@ export const deleteStudent = (id) => {
 export const findStudent = (id) => getStudents().find(s => s.id === id) || null;
 
 export const normalizeVerificationStages = (stages = {}) => {
-  if (!stages[8] && !stages[9]) return stages;
+  if (Object.prototype.hasOwnProperty.call(stages, 'removedCommunityCertificateStage')) return stages;
 
-  return {
+  const usesEarlierNumbering = Object.prototype.hasOwnProperty.call(stages, '8')
+    || Object.prototype.hasOwnProperty.call(stages, '9');
+  const usesCurrentNumbering = Object.prototype.hasOwnProperty.call(stages, '7');
+  if (!usesEarlierNumbering && !usesCurrentNumbering) return stages;
+
+  const normalized = {
+    ...stages,
     1: stages[1],
     2: stages[2],
     3: stages[3],
-    4: stages[4],
-    5: stages[7],
-    6: stages[8],
-    7: stages[9],
+    4: usesEarlierNumbering ? stages[7] : stages[5],
+    5: usesEarlierNumbering ? stages[8] : stages[6],
+    6: usesEarlierNumbering ? stages[9] : stages[7],
+    removedCommunityCertificateStage: stages[4],
   };
+  delete normalized[7];
+  delete normalized[8];
+  delete normalized[9];
+  return normalized;
 };
 
 // Users
@@ -112,17 +122,26 @@ export const saveStage2Verification = (studentId, verification) =>
   localStorage.setItem(`uniportal_stage2_verification_${studentId}`, JSON.stringify(verification));
 
 const LEGACY_STAGE_IDS = { 5: 7, 6: 8, 7: 9 };
+const PREVIOUS_STAGE_IDS = { 4: 5, 5: 6, 6: 7 };
 
 const studentStageVerificationKey = (studentId, stageId) =>
-  stageId === '3' || stageId === '4'
-    ? `uniportal_stage${stageId}_verification_${studentId}`
-    : `uniportal_stage_verification_v2_${studentId}_${stageId}`;
+  stageId === '3'
+    ? `uniportal_stage3_verification_${studentId}`
+    : `uniportal_stage_verification_v3_${studentId}_${stageId}`;
 
 export const getStudentStageVerification = (studentId, stageId) => {
   const current = getItem(studentStageVerificationKey(studentId, stageId));
   if (current) return current;
 
-  const legacyStageId = LEGACY_STAGE_IDS[stageId];
+  const previousStageId = PREVIOUS_STAGE_IDS[stageId];
+  if (!previousStageId) return {};
+
+  const previousVersion = getItem(
+    `uniportal_stage_verification_v2_${studentId}_${previousStageId}`
+  );
+  if (previousVersion) return previousVersion;
+
+  const legacyStageId = LEGACY_STAGE_IDS[previousStageId];
   return legacyStageId
     ? getItem(`uniportal_stage${legacyStageId}_verification_${studentId}`) || {}
     : {};

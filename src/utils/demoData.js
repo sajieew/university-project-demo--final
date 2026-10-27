@@ -38,10 +38,9 @@ export const VERIFICATION_STAGES = [
   { id: 1, name: 'Application & Student Details Verification' },
   { id: 2, name: 'Academic Qualification Verification' },
   { id: 3, name: 'Original Certificate Verification' },
-  { id: 4, name: 'Community Certificate Verification' },
-  { id: 5, name: 'Transfer and NRI Certificate Verification' },
-  { id: 6, name: 'Payment Verification' },
-  { id: 7, name: 'Approval Certificate Verification' },
+  { id: 4, name: 'Transfer Certificate Verification' },
+  { id: 5, name: 'Payment Verification' },
+  { id: 6, name: 'Approval Certificate Verification' },
 ];
 
 export const ELIGIBILITY_PARAMETERS = [

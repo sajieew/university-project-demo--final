@@ -78,7 +78,6 @@ function AppRoutes() {
         <Route path="verification/stage-4/:studentId" element={<StageCertificateVerificationPage stageNumber={4} />} />
         <Route path="verification/stage-5/:studentId" element={<StageCertificateVerificationPage stageNumber={5} />} />
         <Route path="verification/stage-6/:studentId" element={<StageCertificateVerificationPage stageNumber={6} />} />
-        <Route path="verification/stage-7/:studentId" element={<StageCertificateVerificationPage stageNumber={7} />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

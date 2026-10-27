@@ -51,7 +51,7 @@ export default function VerificationStepper({ stages, onChange, recordId, isEdit
                       >
                         Stage {stage.id} — {stage.name}
                       </Link>
-                    ) : stage.id >= 3 ? (
+                    ) : (
                       <Link
                         to={`/verification/stage-${stage.id}/${recordId}`}
                         state={{
@@ -63,11 +63,6 @@ export default function VerificationStepper({ stages, onChange, recordId, isEdit
                       >
                         Stage {stage.id} — {stage.name}
                       </Link>
-                    ) : (
-                      <>
-                        <span className="text-xs font-bold text-slate-400">Stage {stage.id}</span>
-                        <span className="text-sm font-semibold text-slate-700">{stage.name}</span>
-                      </>
                     )}
                   </div>
                 </div>
