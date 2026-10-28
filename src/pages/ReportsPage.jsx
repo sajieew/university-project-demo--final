@@ -3,6 +3,7 @@ import { BarChart3, Download, Printer } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import AdmissionFormsPage from './AdmissionFormsPage';
+import { getOverallVerificationStatus } from '../utils/verification';
 
 const PROGRAMMES = ['B.E.', 'B.Tech.', 'M.E.', 'M.Tech.', 'MCA', 'MBA'];
 const COLORS = ['bg-blue-500', 'bg-emerald-500', 'bg-violet-500', 'bg-amber-500', 'bg-rose-500', 'bg-teal-500'];
@@ -31,8 +32,8 @@ export default function ReportsPage() {
     [students]);
 
   const verData = useMemo(() => [
-    { label: 'Verified', count: students.filter(s => s.verificationStatus === 'Verified').length },
-    { label: 'Pending',  count: students.filter(s => s.verificationStatus === 'Pending').length },
+    { label: 'Verified', count: students.filter(s => getOverallVerificationStatus(s.id) === 'Verified').length },
+    { label: 'Not Verified', count: students.filter(s => getOverallVerificationStatus(s.id) === 'Not Verified').length },
   ], [students]);
 
   const admData = useMemo(() => [
@@ -92,7 +93,7 @@ export default function ReportsPage() {
           { label: 'Total Applications',   value: total,                                         color: 'text-blue-700',    border: 'border-blue-100',    bg: 'bg-blue-50' },
           { label: 'Verified',             value: verData[0].count,                              color: 'text-emerald-700', border: 'border-emerald-100', bg: 'bg-emerald-50' },
           { label: 'Approved',             value: admData[0].count,                              color: 'text-emerald-700', border: 'border-emerald-100', bg: 'bg-emerald-50' },
-          { label: 'Pending Verification', value: verData[1].count,                              color: 'text-amber-700',   border: 'border-amber-100',   bg: 'bg-amber-50' },
+          { label: 'Not Verified',         value: verData[1].count,                              color: 'text-red-700',     border: 'border-red-100',     bg: 'bg-red-50' },
         ].map(c => (
           <div key={c.label} className={`card p-5 ${c.bg} border ${c.border}`}>
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{c.label}</p>

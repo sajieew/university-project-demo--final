@@ -14,7 +14,7 @@ const BRANCHES = [
   'Finance',
 ];
 const CATEGORIES = ['Merit', 'Management', 'NRI', 'Other'];
-const VERIFICATION_STATUSES = ['Verified', 'Pending'];
+const VERIFICATION_STATUSES = ['Verified', 'Not Verified'];
 const ADMISSION_STATUSES = ['Approved', 'Provisionally Approved', 'Pending', 'Rejected'];
 const ACADEMIC_YEARS = ['2024-25', '2023-24', '2022-23', '2021-22'];
 

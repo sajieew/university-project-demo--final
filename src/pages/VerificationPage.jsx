@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronRight, Clock, Circle, UserPlus } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/ui/StatusBadge';
@@ -8,12 +8,21 @@ import { VERIFICATION_STAGES } from '../utils/demoData';
 import { VERIFICATION_UPDATED_EVENT } from '../utils/localStorage';
 import { getPendingVerificationItems } from '../utils/verification';
 
+const verificationPageStateByKey = new Map();
+
 export default function VerificationPage() {
   const { students } = useApp();
+  const location = useLocation();
   const navigate = useNavigate();
-  const [search, setSearch] = useState('');
-  const [expandedStages, setExpandedStages] = useState({});
+  const [search, setSearch] = useState(() => verificationPageStateByKey.get(location.key)?.search || '');
+  const [expandedStages, setExpandedStages] = useState(
+    () => verificationPageStateByKey.get(location.key)?.expandedStages || {}
+  );
   const [, setVerificationRevision] = useState(0);
+
+  useEffect(() => {
+    verificationPageStateByKey.set(location.key, { search, expandedStages });
+  }, [expandedStages, location.key, search]);
 
   useEffect(() => {
     const refreshVerification = () => setVerificationRevision(revision => revision + 1);
@@ -41,6 +50,7 @@ export default function VerificationPage() {
     const state = {
       recordId: studentId,
       returnTo: '/verify',
+      returnToKey: location.key,
       openSection: 2,
       focusItem: itemId,
     };

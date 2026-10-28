@@ -77,3 +77,10 @@ export function getStageStatus(stageId, verification = {}) {
 export function getSavedStageStatus(stageId, studentId) {
   return getStageStatus(stageId, getStageVerification(stageId, studentId));
 }
+
+export function getOverallVerificationStatus(studentId) {
+  const allStagesCompleted = Object.keys(VERIFICATION_ITEMS).every(stageId =>
+    getSavedStageStatus(stageId, studentId) === 'Completed'
+  );
+  return allStagesCompleted ? 'Verified' : 'Not Verified';
+}

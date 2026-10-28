@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save } from 'lucide-react';
 import { useApp } from '../context/AppContext';
@@ -19,6 +19,8 @@ export default function Stage2VerificationPage() {
     ...EMPTY_VERIFICATION,
     ...getStage2Verification(studentId),
   }));
+  const [isSaving, setIsSaving] = useState(false);
+  const isSavingRef = useRef(false);
   const { completedCount: verifiedCount, totalCount, percentage: progress } =
     getStageProgress(2, verification);
 
@@ -37,13 +39,20 @@ export default function Stage2VerificationPage() {
   };
 
   const handleSave = () => {
+    if (isSavingRef.current) return;
+    isSavingRef.current = true;
+    setIsSaving(true);
     try {
       saveStage2Verification(studentId, verification);
-      showToast('Stage 2 verification saved successfully.', 'success');
     } catch (error) {
+      isSavingRef.current = false;
+      setIsSaving(false);
       console.error('Stage 2 verification save error', error);
       showToast('Unable to save Stage 2 verification. Please check browser storage and try again.', 'error');
+      return;
     }
+    showToast('Stage 2 verification saved successfully.', 'success');
+    handleBack();
   };
 
   const handleBack = () => {
@@ -71,8 +80,8 @@ export default function Stage2VerificationPage() {
             <p className="text-sm text-slate-400">Verify the student&apos;s 10th, 11th, and 12th mark certificates.</p>
           </div>
         </div>
-        <button type="button" onClick={handleSave} className="btn-primary">
-          <Save size={15} /> Save Verification
+        <button type="button" onClick={handleSave} disabled={isSaving} className="btn-primary disabled:cursor-not-allowed disabled:opacity-60">
+          <Save size={15} /> {isSaving ? 'Saving...' : 'Save Verification'}
         </button>
       </div>
 
@@ -146,8 +155,8 @@ export default function Stage2VerificationPage() {
       </div>
 
       <div className="flex justify-end">
-        <button type="button" onClick={handleSave} className="btn-primary">
-          <Save size={15} /> Save Verification
+        <button type="button" onClick={handleSave} disabled={isSaving} className="btn-primary disabled:cursor-not-allowed disabled:opacity-60">
+          <Save size={15} /> {isSaving ? 'Saving...' : 'Save Verification'}
         </button>
       </div>
     </div>

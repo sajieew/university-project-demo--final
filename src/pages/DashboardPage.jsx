@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import StatCard from '../components/ui/StatCard';
 import StatusBadge from '../components/ui/StatusBadge';
 import { formatDate } from '../utils/validation';
+import { getOverallVerificationStatus } from '../utils/verification';
 
 function MiniChart({ data, max, color }) {
   return (
@@ -29,8 +30,8 @@ export default function DashboardPage() {
   const navigate = useNavigate();
 
   const total     = students.length;
-  const verified  = students.filter(s => s.verificationStatus === 'Verified').length;
-  const pending   = students.filter(s => s.verificationStatus === 'Pending').length;
+  const verified  = students.filter(s => getOverallVerificationStatus(s.id) === 'Verified').length;
+  const notVerified = students.length - verified;
   const approved  = students.filter(s => s.admissionStatus === 'Approved').length;
   const provAppr  = students.filter(s => s.admissionStatus === 'Provisionally Approved').length;
   const rejected  = students.filter(s => s.admissionStatus === 'Rejected').length;
@@ -69,7 +70,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatCard icon={<Users size={20} />}       label="Total Applications" value={total}    color="blue"    onClick={() => navigate('/students')} />
         <StatCard icon={<CheckCircle size={20} />} label="Verified"           value={verified} color="emerald" onClick={() => navigate('/students?verificationStatus=Verified')} />
-        <StatCard icon={<Clock size={20} />}       label="Pending"            value={pending}  color="amber"   onClick={() => navigate('/students?verificationStatus=Pending')} />
+        <StatCard icon={<Clock size={20} />}       label="Not Verified"       value={notVerified} color="red" onClick={() => navigate('/students?verificationStatus=Not+Verified')} />
         <StatCard icon={<FileText size={20} />}    label="Approved"           value={approved} color="emerald" onClick={() => navigate('/students?admissionStatus=Approved')} />
         <StatCard icon={<TrendingUp size={20} />}  label="Provisional"        value={provAppr} color="violet"  onClick={() => navigate('/students?admissionStatus=Provisionally+Approved')} />
         <StatCard icon={<XCircle size={20} />}     label="Rejected"           value={rejected} color="red"     onClick={() => navigate('/students?admissionStatus=Rejected')} />

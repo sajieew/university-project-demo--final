@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save } from 'lucide-react';
 import { useApp } from '../context/AppContext';
@@ -43,6 +43,8 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
       ...getStudentStageVerification(studentId, stageId),
     };
   });
+  const [isSaving, setIsSaving] = useState(false);
+  const isSavingRef = useRef(false);
 
   if (!stage) {
     return (
@@ -81,13 +83,20 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
   };
 
   const handleSave = () => {
+    if (isSavingRef.current) return;
+    isSavingRef.current = true;
+    setIsSaving(true);
     try {
       saveStudentStageVerification(studentId, stageId, verification);
-      showToast(`Stage ${stageId} verification saved successfully.`, 'success');
     } catch (error) {
+      isSavingRef.current = false;
+      setIsSaving(false);
       console.error(`Stage ${stageId} verification save error`, error);
       showToast('Unable to save verification. Please check browser storage and try again.', 'error');
+      return;
     }
+    showToast(`Stage ${stageId} verification saved successfully.`, 'success');
+    handleBack();
   };
 
   const handleBack = () => {
@@ -115,8 +124,8 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
             <p className="text-sm text-slate-400">Select Yes or No to record each compulsory verification decision.</p>
           </div>
         </div>
-        <button type="button" onClick={handleSave} className="btn-primary">
-          <Save size={15} /> Save Verification
+        <button type="button" onClick={handleSave} disabled={isSaving} className="btn-primary disabled:cursor-not-allowed disabled:opacity-60">
+          <Save size={15} /> {isSaving ? 'Saving...' : 'Save Verification'}
         </button>
       </div>
 
@@ -203,8 +212,8 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
       </div>
 
       <div className="flex justify-end">
-        <button type="button" onClick={handleSave} className="btn-primary">
-          <Save size={15} /> Save Verification
+        <button type="button" onClick={handleSave} disabled={isSaving} className="btn-primary disabled:cursor-not-allowed disabled:opacity-60">
+          <Save size={15} /> {isSaving ? 'Saving...' : 'Save Verification'}
         </button>
       </div>
     </div>

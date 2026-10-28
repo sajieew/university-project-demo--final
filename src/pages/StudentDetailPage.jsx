@@ -2,7 +2,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Pencil, FileDown, Printer, Trash2, CheckCircle, Clock, Minus } from 'lucide-react';
 import { findStudent, normalizeVerificationStages } from '../utils/localStorage';
-import { getSavedStageStatus } from '../utils/verification';
+import { getOverallVerificationStatus, getSavedStageStatus } from '../utils/verification';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/ui/StatusBadge';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
@@ -44,12 +44,7 @@ export default function StudentDetailPage() {
   if (!student) return null;
 
   const stages = normalizeVerificationStages(student.stages);
-  const stageStatuses = VERIFICATION_STAGES.map(stage =>
-    getSavedStageStatus(stage.id, student.id)
-  );
-  const verificationStatus = stageStatuses.every(status => status === 'Completed')
-    ? 'Verified'
-    : 'Pending';
+  const verificationStatus = getOverallVerificationStatus(student.id);
 
   const handleDelete = () => {
     removeStudent(student.id);

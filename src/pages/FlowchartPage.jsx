@@ -197,7 +197,7 @@ export default function FlowchartPage() {
 
           <rect x="240" y="618" width="180" height="50" rx="10" fill="#fefce8" stroke="#eab308" strokeWidth="1.5" filter="url(#shadow)" />
           <text x="330" y="638" textAnchor="middle" fill="#713f12" fontSize="12" fontWeight="600">Filter Pending Records</text>
-          <text x="330" y="653" textAnchor="middle" fill="#ca8a04" fontSize="10">verificationStatus = Pending</text>
+          <text x="330" y="653" textAnchor="middle" fill="#ca8a04" fontSize="10">verificationStatus = Not Verified</text>
 
           <line x1="330" y1="668" x2="330" y2="700" stroke="#64748b" strokeWidth="2" markerEnd="url(#arrow)" />
 

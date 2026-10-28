@@ -10,7 +10,7 @@ import {
 } from '../utils/localStorage';
 import { generateId } from '../utils/validation';
 import { VERIFICATION_STAGES, ELIGIBILITY_PARAMETERS } from '../utils/demoData';
-import { getSavedStageStatus } from '../utils/verification';
+import { getOverallVerificationStatus, getSavedStageStatus } from '../utils/verification';
 
 import StudentDetailsForm from '../components/forms/StudentDetailsForm';
 import VerificationStepper from '../components/forms/VerificationStepper';
@@ -185,10 +185,7 @@ export default function StudentFormPage() {
         status: getSavedStageStatus(stage.id, isEdit ? id : draftId),
       },
     ]));
-    const allVerified = VERIFICATION_STAGES.every(stage =>
-      savedStages[stage.id].status === 'Completed'
-    );
-    const verificationStatus = allVerified ? 'Verified' : 'Pending';
+    const verificationStatus = getOverallVerificationStatus(isEdit ? id : draftId);
 
     // Auto-calculate totals from subject marks
     const mathsObt = Number(data.mathsObt) || 0;

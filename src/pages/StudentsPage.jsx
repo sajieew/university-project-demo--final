@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { UserPlus, Download, RefreshCw, SlidersHorizontal } from 'lucide-react';
 import { useApp } from '../context/AppContext';
@@ -6,6 +6,8 @@ import StudentTable from '../components/students/StudentTable';
 import SearchBar from '../components/students/SearchBar';
 import FilterPanel from '../components/students/FilterPanel';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { VERIFICATION_UPDATED_EVENT } from '../utils/localStorage';
+import { getOverallVerificationStatus } from '../utils/verification';
 
 const EMPTY_FILTERS = { academicYear: '', programme: '', branch: '', category: '', verificationStatus: '', admissionStatus: '' };
 
@@ -29,29 +31,41 @@ export default function StudentsPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(0);
   const [toDelete, setToDelete] = useState(null);
+  const [, setVerificationRevision] = useState(0);
+
+  useEffect(() => {
+    const refreshVerification = () => setVerificationRevision(revision => revision + 1);
+    window.addEventListener(VERIFICATION_UPDATED_EVENT, refreshVerification);
+    window.addEventListener('storage', refreshVerification);
+    return () => {
+      window.removeEventListener(VERIFICATION_UPDATED_EVENT, refreshVerification);
+      window.removeEventListener('storage', refreshVerification);
+    };
+  }, []);
 
   // Reset page on search/filter change
   useEffect(() => { setPage(0); }, [search, appliedFilters]);
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase().trim();
-    return students.filter(s => {
-      const matchSearch = !q || [
-        s.applicationNo, s.admissionNo, s.name, s.mobile, s.email
-      ].some(v => v?.toLowerCase().includes(q));
+  const q = search.toLowerCase().trim();
+  const filtered = students.map(student => ({
+    ...student,
+    verificationStatus: getOverallVerificationStatus(student.id),
+  })).filter(s => {
+    const matchSearch = !q || [
+      s.applicationNo, s.admissionNo, s.name, s.mobile, s.email
+    ].some(v => v?.toLowerCase().includes(q));
 
-      const { academicYear, programme, branch, category, verificationStatus, admissionStatus } = appliedFilters;
-      const matchFilters =
-        (!academicYear       || s.academicYear === academicYear) &&
-        (!programme          || s.programme === programme) &&
-        (!branch             || s.branch === branch) &&
-        (!category           || s.category === category) &&
-        (!verificationStatus || s.verificationStatus === verificationStatus) &&
-        (!admissionStatus    || s.admissionStatus === admissionStatus);
+    const { academicYear, programme, branch, category, verificationStatus, admissionStatus } = appliedFilters;
+    const matchFilters =
+      (!academicYear       || s.academicYear === academicYear) &&
+      (!programme          || s.programme === programme) &&
+      (!branch             || s.branch === branch) &&
+      (!category           || s.category === category) &&
+      (!verificationStatus || s.verificationStatus === verificationStatus) &&
+      (!admissionStatus    || s.admissionStatus === admissionStatus);
 
-      return matchSearch && matchFilters;
-    });
-  }, [students, search, appliedFilters]);
+    return matchSearch && matchFilters;
+  });
 
   const handleDelete = () => {
     if (toDelete) {

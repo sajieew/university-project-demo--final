@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save } from 'lucide-react';
 import { useApp } from '../context/AppContext';
@@ -17,8 +17,21 @@ export default function Stage1VerificationPage() {
   const [verification, setVerification] = useState(
     () => getStage1Verification(location.state?.recordId)[VERIFICATION_ITEM_KEY] || EMPTY_VERIFICATION
   );
+  const [isSaving, setIsSaving] = useState(false);
+  const isSavingRef = useRef(false);
   const verifiedCount = verification.status === 'Yes' ? 1 : 0;
   const progress = verifiedCount * 100;
+
+  const handleBack = () => {
+    if (location.state?.returnToKey) {
+      navigate(-1);
+      return;
+    }
+
+    navigate(location.state?.returnTo || '/students/new', {
+      state: { recordId: location.state?.recordId, openSection: 2 },
+    });
+  };
 
   const handleChange = (status) => {
     const nextVerification = { status };
@@ -35,16 +48,23 @@ export default function Stage1VerificationPage() {
   };
 
   const handleSave = () => {
+    if (isSavingRef.current) return;
+    isSavingRef.current = true;
+    setIsSaving(true);
     try {
       saveStage1Verification({
         ...getStage1Verification(location.state?.recordId),
         [VERIFICATION_ITEM_KEY]: verification,
       }, location.state?.recordId);
-      showToast('Stage 1 verification saved successfully.', 'success');
     } catch (error) {
+      isSavingRef.current = false;
+      setIsSaving(false);
       console.error('Stage 1 verification save error', error);
       showToast('Unable to save Stage 1 verification. Please check browser storage and try again.', 'error');
+      return;
     }
+    showToast('Stage 1 verification saved successfully.', 'success');
+    handleBack();
   };
 
   return (
@@ -53,15 +73,7 @@ export default function Stage1VerificationPage() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => {
-              if (location.state?.returnToKey) {
-                navigate(-1);
-                return;
-              }
-              navigate(location.state?.returnTo || '/students/new', {
-                state: { recordId: location.state?.recordId, openSection: 2 },
-              });
-            }}
+            onClick={handleBack}
             className="btn-secondary btn-sm"
           >
             <ArrowLeft size={13} /> Back
@@ -73,8 +85,8 @@ export default function Stage1VerificationPage() {
             <p className="text-sm text-slate-400">Review the application and student details entered in Section A.</p>
           </div>
         </div>
-        <button type="button" onClick={handleSave} className="btn-primary">
-          <Save size={15} /> Save Verification
+        <button type="button" onClick={handleSave} disabled={isSaving} className="btn-primary disabled:cursor-not-allowed disabled:opacity-60">
+          <Save size={15} /> {isSaving ? 'Saving...' : 'Save Verification'}
         </button>
       </div>
 
@@ -147,8 +159,8 @@ export default function Stage1VerificationPage() {
       </div>
 
       <div className="flex justify-end">
-        <button type="button" onClick={handleSave} className="btn-primary">
-          <Save size={15} /> Save Verification
+        <button type="button" onClick={handleSave} disabled={isSaving} className="btn-primary disabled:cursor-not-allowed disabled:opacity-60">
+          <Save size={15} /> {isSaving ? 'Saving...' : 'Save Verification'}
         </button>
       </div>
     </div>
