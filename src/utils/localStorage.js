@@ -5,6 +5,9 @@ export const KEYS = {
   NOTIFICATIONS: 'uniportal_notifications',
   AUTH:          'uniportal_auth',
   STAGE1_VERIFICATION: 'uniportal_stage1_verification',
+  PROVISIONAL_ALLOTMENTS: 'uniportal_provisional_allotments',
+  ENTRANCE_EXAMINATION_TICKETS: 'uniportal_entrance_examination_tickets',
+  RANK_STATEMENTS: 'uniportal_rank_statements',
 };
 
 export const VERIFICATION_UPDATED_EVENT = 'uniportal-verification-updated';
@@ -55,6 +58,55 @@ export const deleteStudent = (id) => {
 };
 
 export const findStudent = (id) => getStudents().find(s => s.id === id) || null;
+
+export const getProvisionalAllotments = () => getItem(KEYS.PROVISIONAL_ALLOTMENTS) || [];
+
+export const saveProvisionalAllotment = (allotment, role) => {
+  if (role !== 'Faculty') {
+    throw new Error('Only faculty can save provisional allotments.');
+  }
+
+  const allotments = getProvisionalAllotments();
+  const updated = allotments.some(item => item.studentId === allotment.studentId)
+    ? allotments.map(item => item.studentId === allotment.studentId ? allotment : item)
+    : [...allotments, allotment];
+
+  localStorage.setItem(KEYS.PROVISIONAL_ALLOTMENTS, JSON.stringify(updated));
+  return updated;
+};
+
+export const getEntranceExaminationTickets = () =>
+  getItem(KEYS.ENTRANCE_EXAMINATION_TICKETS) || [];
+
+export const saveEntranceExaminationTicket = (ticket, role) => {
+  if (role !== 'Faculty') {
+    throw new Error('Only faculty can save entrance examination hall tickets.');
+  }
+
+  const tickets = getEntranceExaminationTickets();
+  const updated = tickets.some(item => item.studentId === ticket.studentId)
+    ? tickets.map(item => item.studentId === ticket.studentId ? ticket : item)
+    : [...tickets, ticket];
+
+  localStorage.setItem(KEYS.ENTRANCE_EXAMINATION_TICKETS, JSON.stringify(updated));
+  return updated;
+};
+
+export const getRankStatements = () => getItem(KEYS.RANK_STATEMENTS) || [];
+
+export const saveRankStatement = (statement, role) => {
+  if (role !== 'Faculty') {
+    throw new Error('Only faculty can save rank statements.');
+  }
+
+  const statements = getRankStatements();
+  const updated = statements.some(item => item.studentId === statement.studentId)
+    ? statements.map(item => item.studentId === statement.studentId ? statement : item)
+    : [...statements, statement];
+
+  localStorage.setItem(KEYS.RANK_STATEMENTS, JSON.stringify(updated));
+  return updated;
+};
 
 export const normalizeVerificationStages = (stages = {}) => {
   if (Object.prototype.hasOwnProperty.call(stages, 'removedCommunityCertificateStage')) return stages;

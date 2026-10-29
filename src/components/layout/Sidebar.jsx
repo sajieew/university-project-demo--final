@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, UserPlus, CheckSquare,
-  BarChart3, Settings, LogOut, GraduationCap, ChevronLeft, ChevronRight, Shield, User, FileText
+  BarChart3, Settings, LogOut, GraduationCap, ChevronLeft, ChevronRight, Shield, User, FileText, Award, TicketCheck, BadgeCheck
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -12,6 +12,9 @@ const NAV_ITEMS = [
   { to: '/verify',       icon: <CheckSquare size={18} />,     label: 'Verification',     roles: ['Admin', 'Faculty'] },
   { to: '/reports',      icon: <BarChart3 size={18} />,       label: 'Reports',          roles: ['Admin'] },
   { to: '/admission-forms', icon: <FileText size={18} />,     label: 'Admission Forms',  roles: ['Admin', 'Faculty'] },
+  { to: '/provisional-allotment', icon: <Award size={18} />,  label: 'Provisional Allotment', roles: ['Admin', 'Faculty'] },
+  { to: '/entrance-examination', icon: <TicketCheck size={18} />, label: 'Entrance Examination', roles: ['Admin', 'Faculty'] },
+  { to: '/rank-statement', icon: <BadgeCheck size={18} />, label: 'Rank Statement', roles: ['Admin', 'Faculty'] },
   { to: '/users',        icon: <Users size={18} />,           label: 'Users',            roles: ['Admin'] },
   { to: '/settings',     icon: <Settings size={18} />,        label: 'Settings',         roles: ['Admin'] },
 ];

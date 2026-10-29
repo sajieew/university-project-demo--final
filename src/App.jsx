@@ -21,6 +21,9 @@ import AdmissionFormsPage from './pages/AdmissionFormsPage';
 import Stage1VerificationPage from './pages/Stage1VerificationPage';
 import Stage2VerificationPage from './pages/Stage2VerificationPage';
 import StageCertificateVerificationPage from './pages/StageCertificateVerificationPage';
+import ProvisionalAllotmentPage from './pages/ProvisionalAllotmentPage';
+import EntranceExaminationPage from './pages/EntranceExaminationPage';
+import RankStatementPage from './pages/RankStatementPage';
 
 // Seed demo data on first load
 seedDemoData();
@@ -73,6 +76,11 @@ function AppRoutes() {
         <Route path="settings" element={<ProtectedRoute adminOnly><SettingsPage /></ProtectedRoute>} />
         <Route path="flowchart" element={<FlowchartPage />} />
         <Route path="admission-forms" element={<AdmissionFormsPage />} />
+        <Route path="provisional-allotment" element={<ProvisionalAllotmentPage />} />
+        <Route path="entrance-examination" element={<EntranceExaminationPage />} />
+        <Route path="entrance-examination/edit" element={<Navigate to="/entrance-examination" replace />} />
+        <Route path="rank-statement" element={<RankStatementPage />} />
+        <Route path="rank-statement/edit" element={<Navigate to="/rank-statement" replace />} />
         <Route path="verification/stage-1" element={<Stage1VerificationPage />} />
         <Route path="verification/stage-2/:studentId" element={<Stage2VerificationPage />} />
         <Route path="verification/stage-3/:studentId" element={<StageCertificateVerificationPage stageNumber={3} />} />
