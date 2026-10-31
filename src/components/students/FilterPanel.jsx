@@ -14,11 +14,11 @@ const BRANCHES = [
   'Finance',
 ];
 const CATEGORIES = ['Merit', 'Management', 'NRI', 'Other'];
-const VERIFICATION_STATUSES = ['Verified', 'Not Verified'];
+const VERIFICATION_STATUSES = ['Not Verified', 'In Progress', 'Action Required', 'Verified'];
 const ADMISSION_STATUSES = ['Approved', 'Provisionally Approved', 'Pending', 'Rejected'];
 const ACADEMIC_YEARS = ['2024-25', '2023-24', '2022-23', '2021-22'];
 
-export default function FilterPanel({ filters, onChange, onApply, onClear, resultCount, totalCount }) {
+export default function FilterPanel({ filters, onChange, onApply, onClear, resultCount, totalCount, users = [] }) {
   const set = (key, val) => onChange({ ...filters, [key]: val });
 
   const activeCount = Object.values(filters).filter(Boolean).length;
@@ -40,7 +40,7 @@ export default function FilterPanel({ filters, onChange, onApply, onClear, resul
         </button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
         <div>
           <label className="label">Academic Year</label>
           <select className="input-field py-1.5 text-xs" value={filters.academicYear || ''} onChange={e => set('academicYear', e.target.value)}>
@@ -81,6 +81,16 @@ export default function FilterPanel({ filters, onChange, onApply, onClear, resul
           <select className="input-field py-1.5 text-xs" value={filters.admissionStatus || ''} onChange={e => set('admissionStatus', e.target.value)}>
             <option value="">All</option>
             {ADMISSION_STATUSES.map(s => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="label">Assigned Officer</label>
+          <select className="input-field py-1.5 text-xs" value={filters.assignedOfficer || ''} onChange={e => set('assignedOfficer', e.target.value)}>
+            <option value="">All Officers</option>
+            <option value="Unassigned">Unassigned</option>
+            {users.filter(user => user.role === 'Faculty').map(user => (
+              <option key={user.id} value={user.id}>{user.name}</option>
+            ))}
           </select>
         </div>
       </div>

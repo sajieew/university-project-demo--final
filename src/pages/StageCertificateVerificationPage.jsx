@@ -4,8 +4,10 @@ import { ArrowLeft, Save } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
   getStudentStageVerification,
+  isVerificationStageAssignedToUser,
   saveStudentStageVerification,
 } from '../utils/localStorage';
+import { useAuth } from '../context/AuthContext';
 import { VERIFICATION_ITEMS, getStageProgress } from '../utils/verification';
 import useVerificationItemFocus from '../hooks/useVerificationItemFocus';
 
@@ -35,6 +37,7 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { showToast } = useApp();
+  const { user } = useAuth();
   useVerificationItemFocus(location.state?.focusItem);
   const [verification, setVerification] = useState(() => {
     if (!stage) return {};
@@ -59,6 +62,10 @@ export default function StageCertificateVerificationPage({ stageNumber }) {
         </button>
       </div>
     );
+  }
+
+  if (!isVerificationStageAssignedToUser(studentId, stageId, user)) {
+    return <div className="card p-8 text-center"><p className="text-sm text-red-700">You are not assigned to verify Stage {stageId} for this student.</p></div>;
   }
 
   const { completedCount, totalCount, percentage: progress } =

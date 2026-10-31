@@ -1,16 +1,22 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useForm, FormProvider } from 'react-hook-form';
-import { Save, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { AlertTriangle, Save, ArrowLeft, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import {
   ADMISSION_DRAFT_UPDATED_EVENT,
+  addNotification,
   findStudent,
+  getStudents,
+  getStudentOfficerAssignment,
   normalizeVerificationStages,
+  recordDuplicateOverride,
 } from '../utils/localStorage';
+import { findDuplicateApplications } from '../utils/duplicateDetection';
 import { generateId } from '../utils/validation';
 import { VERIFICATION_STAGES, ELIGIBILITY_PARAMETERS } from '../utils/demoData';
-import { getOverallVerificationStatus, getSavedStageStatus } from '../utils/verification';
+import { getAdmissionStatus, getOverallVerificationStatus, getSavedStageStatus } from '../utils/verification';
 
 import StudentDetailsForm from '../components/forms/StudentDetailsForm';
 import VerificationStepper from '../components/forms/VerificationStepper';
@@ -44,7 +50,10 @@ export default function StudentFormPage() {
   const isEdit = !!id;
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { createStudent, editStudent } = useApp();
+  const [duplicateReview, setDuplicateReview] = useState(null);
+  const [duplicateOverrideReason, setDuplicateOverrideReason] = useState('');
 
   const formDraftStorageKey = `admission-form-draft-${location.key}`;
   const [formDraft] = useState(() => {
@@ -176,8 +185,9 @@ export default function StudentFormPage() {
     return next;
   });
 
-  const onSave = (data) => {
+  const persistStudent = (data) => {
     const existingStudent = isEdit ? findStudent(id) : null;
+    const previousAdmissionStatus = getAdmissionStatus(existingStudent);
     const savedStages = Object.fromEntries(VERIFICATION_STAGES.map(stage => [
       stage.id,
       {
@@ -223,6 +233,22 @@ export default function StudentFormPage() {
     } else {
       createStudent(record);
     }
+    if (approval.status === 'Approved' && previousAdmissionStatus !== 'Approved') {
+      const assignment = getStudentOfficerAssignment(record.id);
+      addNotification({
+        title: 'Admission approved',
+        message: `${record.name}'s admission was approved.`,
+        type: 'success',
+        studentId: record.id,
+        studentName: record.name,
+        recipientIds: [...new Set([
+          assignment?.officerId,
+          ...Object.values(assignment?.stageAssignments || {}),
+        ].filter(Boolean))],
+        recipientRoles: ['Admin'],
+        eventKey: `admission-approved:${record.id}:${record.updatedAt}`,
+      });
+    }
     try {
       sessionStorage.removeItem(formDraftStorageKey);
       sessionStorage.removeItem(draftIdStorageKey(location.key));
@@ -230,6 +256,52 @@ export default function StudentFormPage() {
       console.error('Unable to clear saved admission form draft.', error);
     }
     navigate('/students');
+  };
+
+  const onSave = (data, { confirmed = false, overrideReason = '' } = {}) => {
+    const duplicates = findDuplicateApplications(
+      data,
+      getStudents(),
+      isEdit ? id : ''
+    );
+    const hasBlockingDuplicate = duplicates.some(match =>
+      match.reasons.some(reason => reason.type === 'blocked')
+    );
+    const requiresAdminOverride = duplicates.some(match =>
+      match.reasons.some(reason => reason.type === 'admin-override')
+    );
+    const authorizedOverride = user?.role === 'Admin' && overrideReason.trim();
+
+    if (
+      hasBlockingDuplicate ||
+      (duplicates.length > 0 && !confirmed) ||
+      (requiresAdminOverride && !authorizedOverride)
+    ) {
+      setDuplicateOverrideReason('');
+      setDuplicateReview({ data, duplicates });
+      return;
+    }
+
+    if (requiresAdminOverride && authorizedOverride) {
+      recordDuplicateOverride({
+        studentId: isEdit ? id : draftId,
+        matches: duplicates
+          .filter(match => match.reasons.some(reason => reason.type === 'admin-override'))
+          .map(match => ({
+            studentId: match.student.id,
+            fields: match.reasons
+              .filter(reason => reason.type === 'admin-override')
+              .map(reason => reason.field),
+          })),
+        reason: overrideReason.trim(),
+        adminId: user.id,
+        adminName: user.name,
+        occurredAt: new Date().toISOString(),
+      });
+    }
+
+    setDuplicateReview(null);
+    persistStudent(data);
   };
 
   return (
@@ -320,6 +392,129 @@ export default function StudentFormPage() {
           </button>
         </div>
       </div>
+      {duplicateReview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="duplicate-review-title"
+            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-100 shadow-2xl"
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-amber-700 bg-amber-950">
+                <AlertTriangle size={20} className="text-amber-300" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 id="duplicate-review-title" className="text-base font-semibold text-slate-100">
+                  Duplicate application review
+                </h2>
+                <p className="mt-1 text-sm leading-5 text-slate-300">
+                  Check the existing records below before continuing. Duplicate application or admission numbers cannot be overridden.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDuplicateReview(null)}
+                className="rounded-md p-1 text-slate-400 hover:bg-slate-700 hover:text-white"
+                aria-label="Close duplicate review"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {duplicateReview.duplicates.map(({ student, reasons }) => (
+                <div key={student.id} className="rounded-xl border border-amber-700 bg-slate-800 p-4">
+                  <p className="text-sm font-semibold text-white">{student.name || 'Unnamed student'}</p>
+                  <p className="mt-1 text-xs text-slate-300">
+                    Application No.: {student.applicationNo || '—'} · Programme: {student.programme || '—'}
+                  </p>
+                  <p className="mt-2 text-xs font-medium leading-5 text-amber-200">
+                    Reason: {reasons.map(reason => {
+                      if (reason.type === 'blocked') return `duplicate ${reason.field.toLowerCase()} — cannot override`;
+                      if (reason.type === 'admin-override') return `matching ${reason.field.toLowerCase()} — Admin override required`;
+                      return 'name and date of birth match — potential duplicate';
+                    }).join('; ')}
+                  </p>
+                  <p className="mt-1 text-xs text-amber-200">
+                    Matching field: {reasons.map(reason => reason.field).join(', ')}
+                  </p>
+                  <a
+                    href={`/students/${encodeURIComponent(student.id)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-block text-xs font-semibold text-blue-300 underline decoration-blue-500/60 underline-offset-2 hover:text-blue-200"
+                  >
+                    View existing student record
+                  </a>
+                </div>
+              ))}
+            </div>
+
+            {duplicateReview.duplicates.some(match =>
+              match.reasons.some(reason => reason.type === 'admin-override')
+            ) && (
+              <div className="mt-4 rounded-lg border border-slate-600 bg-slate-800 p-4">
+                {user?.role === 'Admin' ? (
+                  <>
+                    <label htmlFor="duplicate-override-reason" className="label !text-slate-200">
+                      Admin override explanation <span className="text-red-400">*</span>
+                    </label>
+                    <textarea
+                      id="duplicate-override-reason"
+                      value={duplicateOverrideReason}
+                      onChange={event => setDuplicateOverrideReason(event.target.value)}
+                      rows={3}
+                      maxLength={500}
+                      className="input-field mt-1 !border-slate-500 !bg-slate-900 !text-slate-100 placeholder:!text-slate-400 focus:!border-blue-400 focus:!ring-blue-500"
+                      placeholder="Explain why this application should proceed despite the matching email or mobile number."
+                    />
+                  </>
+                ) : (
+                  <p className="text-sm font-medium text-red-300">
+                    Only an Admin can override a matching email address or mobile number.
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setDuplicateReview(null);
+                  setDuplicateOverrideReason('');
+                }}
+                className="btn-secondary !border-slate-600 !bg-slate-700 !text-slate-100 hover:!bg-slate-600 focus:!ring-slate-400"
+              >
+                Return to form
+              </button>
+              {!duplicateReview.duplicates.some(match =>
+                match.reasons.some(reason => reason.type === 'blocked')
+              ) && (user?.role === 'Admin' ||
+                !duplicateReview.duplicates.some(match =>
+                  match.reasons.some(reason => reason.type === 'admin-override')
+                )) && (
+                <button
+                  type="button"
+                  onClick={() => onSave(duplicateReview.data, {
+                    confirmed: true,
+                    overrideReason: duplicateOverrideReason,
+                  })}
+                  disabled={
+                    duplicateReview.duplicates.some(match =>
+                      match.reasons.some(reason => reason.type === 'admin-override')
+                    ) && !duplicateOverrideReason.trim()
+                  }
+                  className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Continue application
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </FormProvider>
   );
 }

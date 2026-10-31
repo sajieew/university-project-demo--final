@@ -2,16 +2,19 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronRight, Clock, Circle, UserPlus } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import StatusBadge from '../components/ui/StatusBadge';
 import SearchBar from '../components/students/SearchBar';
 import { VERIFICATION_STAGES } from '../utils/demoData';
-import { VERIFICATION_UPDATED_EVENT } from '../utils/localStorage';
-import { getPendingVerificationItems } from '../utils/verification';
+import { isVerificationStageAssignedToUser, VERIFICATION_UPDATED_EVENT } from '../utils/localStorage';
+import { getAssignedStudentIdsForOfficer } from '../utils/verification';
+import { getOverallVerificationStatus, getPendingVerificationItems } from '../utils/verification';
 
 const verificationPageStateByKey = new Map();
 
 export default function VerificationPage() {
   const { students } = useApp();
+  const { user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [search, setSearch] = useState(() => verificationPageStateByKey.get(location.key)?.search || '');
@@ -39,9 +42,13 @@ export default function VerificationPage() {
     pendingStages: VERIFICATION_STAGES.map(stage => ({
       ...stage,
       pendingItems: getPendingVerificationItems(stage.id, student.id),
-    })).filter(stage => stage.pendingItems.length > 0),
+    })).filter(stage =>
+      stage.pendingItems.length > 0 &&
+      isVerificationStageAssignedToUser(student.id, stage.id, user)
+    ),
   })).filter(student =>
     student.pendingStages.some(stage => stage.pendingItems.length > 0) &&
+    (user?.role !== 'Faculty' || getAssignedStudentIdsForOfficer(user.id).includes(student.id)) &&
     (student.name.toLowerCase().includes(search.toLowerCase()) ||
       student.applicationNo.toLowerCase().includes(search.toLowerCase()))
   );
@@ -95,11 +102,13 @@ export default function VerificationPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <StatusBadge status="Pending" />
+                  <StatusBadge status={getOverallVerificationStatus(student.id)} />
                   <button
-                    onClick={() => navigate(`/students/${student.id}/edit`, {
-                      state: { recordId: student.id, openSection: 2 },
-                    })}
+                    onClick={() => openVerificationItem(
+                      student.id,
+                      student.pendingStages[0].id,
+                      student.pendingStages[0].pendingItems[0].id
+                    )}
                     className="btn-primary btn-sm"
                   >
                     Verify Now

@@ -6,6 +6,7 @@ import { getSavedStageStatus } from '../../utils/verification';
 const STATUS_STYLES = {
   Completed: { dot: 'bg-emerald-500 border-emerald-500', badge: 'bg-emerald-50 text-emerald-700', icon: <Check size={12} className="text-white" /> },
   Pending:   { dot: 'bg-red-500 border-red-500', badge: 'bg-red-50 text-red-700', icon: <Clock size={12} className="text-white" /> },
+  Rejected:  { dot: 'bg-red-500 border-red-500', badge: 'bg-red-50 text-red-700', icon: <Clock size={12} className="text-white" /> },
 };
 
 export default function VerificationStepper({ stages, onChange, recordId, isEdit }) {

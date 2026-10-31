@@ -1,9 +1,13 @@
-import { useState } from 'react';
-import { UserPlus, Pencil, Trash2, UserCheck, UserX } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { UserPlus, Pencil, Trash2, UserCheck, UserX, ChevronDown, ChevronRight } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/ui/StatusBadge';
 import Modal from '../components/ui/Modal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { getStudentOfficerAssignment, getVerificationAssignments, saveStudentOfficerAssignment, VERIFICATION_UPDATED_EVENT } from '../utils/localStorage';
+import { getOfficerWorkloads } from '../utils/verification';
+import { VERIFICATION_STAGES } from '../utils/demoData';
 
 function UserForm({ initial, onSave, onCancel }) {
   const [form, setForm] = useState(initial || { name: '', username: '', role: 'Faculty', status: 'Active', email: '', password: '' });
@@ -52,10 +56,41 @@ function UserForm({ initial, onSave, onCancel }) {
 }
 
 export default function UsersPage() {
-  const { users, createUser, editUser, removeUser } = useApp();
+  const { users, students, createUser, editUser, removeUser, showToast } = useApp();
+  const navigate = useNavigate();
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [toDelete, setToDelete] = useState(null);
+  const [assignments, setAssignments] = useState(getVerificationAssignments);
+  const [expandedStudent, setExpandedStudent] = useState(null);
+
+  useEffect(() => {
+    const refresh = () => setAssignments(getVerificationAssignments());
+    window.addEventListener(VERIFICATION_UPDATED_EVENT, refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener(VERIFICATION_UPDATED_EVENT, refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
+
+  const activeFaculty = users.filter(user => user.role === 'Faculty' && user.status === 'Active');
+  const workloads = getOfficerWorkloads(students);
+  const assignedStudentIds = new Set(assignments
+    .filter(assignment => assignment.officerId || Object.values(assignment.stageAssignments || {}).some(Boolean))
+    .map(assignment => assignment.studentId));
+  const unassignedCount = students.filter(student => !assignedStudentIds.has(student.id)).length;
+
+  const assignOfficer = (studentId, stageId, officerId) => {
+    try {
+      saveStudentOfficerAssignment(studentId, stageId, officerId);
+      setAssignments(getVerificationAssignments());
+      showToast('Verification officer assignment updated.', 'success');
+    } catch (error) {
+      console.error('Verification officer assignment error', error);
+      showToast(error.message || 'Unable to update officer assignment.', 'error');
+    }
+  };
 
   const handleCreate = (form) => {
     createUser({ ...form, id: `USR${Date.now()}` });
@@ -128,6 +163,123 @@ export default function UsersPage() {
           </tbody>
         </table>
       </div>
+
+      <section className="space-y-4">
+        <div className="flex items-end justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-lg font-bold text-slate-800">Verification Officer Assignments</h2>
+            <p className="text-sm text-slate-400">{unassignedCount} students unassigned · assignments are limited to active Faculty</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {workloads.map(officer => (
+            <button
+              key={officer.id}
+              type="button"
+              onClick={() => navigate(`/students?assignedOfficer=${encodeURIComponent(officer.id)}`)}
+              className="card p-4 text-left hover:shadow-md transition-shadow"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-slate-800">{officer.name}</p>
+                  <p className="text-xs text-slate-400">{officer.assignedStudents} assigned students</p>
+                </div>
+                <StatusBadge status={officer.status} />
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                <div><p className="text-lg font-bold text-amber-600">{officer.pendingTasks}</p><p className="text-[10px] text-slate-400">Pending</p></div>
+                <div><p className="text-lg font-bold text-emerald-600">{officer.completedTasks}</p><p className="text-[10px] text-slate-400">Completed</p></div>
+                <div><p className="text-lg font-bold text-red-600">{officer.rejectedDocuments}</p><p className="text-[10px] text-slate-400">Rejected</p></div>
+              </div>
+              <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+                <span>Work completion</span><span className="font-semibold">{officer.completionPercentage}%</span>
+              </div>
+              <div className="mt-1 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                <div className="h-full rounded-full bg-blue-600" style={{ width: `${officer.completionPercentage}%` }} />
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div className="card overflow-x-auto">
+          <table className="w-full min-w-[720px] text-left">
+            <thead>
+              <tr className="border-b border-slate-100">
+                <th className="table-header">Student</th>
+                <th className="table-header">Student Officer</th>
+                <th className="table-header">Stage Assignments</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {students.map(student => {
+                const assignment = getStudentOfficerAssignment(student.id);
+                const expanded = expandedStudent === student.id;
+                return (
+                  <tr key={student.id} className="align-top hover:bg-slate-50/50">
+                    <td className="table-cell">
+                      <p className="font-medium text-slate-800">{student.name}</p>
+                      <p className="text-xs text-slate-400">{student.applicationNo}</p>
+                    </td>
+                    <td className="table-cell">
+                      <select
+                        className="input-field py-1.5 text-xs"
+                        aria-label={`Assign officer for ${student.name}`}
+                        value={assignment?.officerId || ''}
+                        onChange={event => assignOfficer(student.id, null, event.target.value)}
+                      >
+                        <option value="">Unassigned</option>
+                        {activeFaculty.map(officer => <option key={officer.id} value={officer.id}>{officer.name}</option>)}
+                      </select>
+                    </td>
+                    <td className="table-cell">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 text-xs font-medium text-blue-700"
+                        aria-expanded={expanded}
+                        onClick={() => setExpandedStudent(expanded ? null : student.id)}
+                      >
+                        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        {expanded ? 'Hide stages' : 'Assign stages'}
+                      </button>
+                      {expanded && (
+                        <div className="mt-2 space-y-2">
+                          {VERIFICATION_STAGES.map(stage => (
+                            <label key={stage.id} className="flex items-center justify-between gap-3 text-xs text-slate-600">
+                              <span className="min-w-0 truncate">Stage {stage.id}</span>
+                              <select
+                                className="input-field max-w-48 py-1 text-xs"
+                                aria-label={`Assign Stage ${stage.id} for ${student.name}`}
+                                value={assignment?.stageAssignments?.[String(stage.id)] || ''}
+                                onChange={event => assignOfficer(student.id, stage.id, event.target.value)}
+                              >
+                                <option value="">Use student officer</option>
+                                {activeFaculty.map(officer => <option key={officer.id} value={officer.id}>{officer.name}</option>)}
+                              </select>
+                            </label>
+                          ))}
+                          {(assignment?.history || []).length > 0 && (
+                            <div className="border-t border-slate-100 pt-2">
+                              <p className="mb-1 text-[10px] font-semibold uppercase text-slate-400">Assignment history</p>
+                              {assignment.history.slice().reverse().map((entry, index) => (
+                                <p key={`${entry.changedAt}-${index}`} className="text-[10px] text-slate-500">
+                                  {new Date(entry.changedAt).toLocaleString()} · {users.find(item => item.id === entry.previousOfficerId)?.name || (entry.previousOfficerId ? 'Former officer' : 'Unassigned')}
+                                  {' → '}
+                                  {users.find(item => item.id === entry.officerId)?.name || 'Unassigned'}
+                                  {entry.stageId ? ` · Stage ${entry.stageId}` : ' · Student assignment'}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <Modal open={showAdd} title="Add New User" onClose={() => setShowAdd(false)}>
         <UserForm onSave={handleCreate} onCancel={() => setShowAdd(false)} />

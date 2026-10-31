@@ -2,17 +2,19 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { UserPlus, Download, RefreshCw, SlidersHorizontal } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import StudentTable from '../components/students/StudentTable';
 import SearchBar from '../components/students/SearchBar';
 import FilterPanel from '../components/students/FilterPanel';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import { VERIFICATION_UPDATED_EVENT } from '../utils/localStorage';
-import { getOverallVerificationStatus } from '../utils/verification';
+import { getStudentOfficerAssignment, VERIFICATION_UPDATED_EVENT } from '../utils/localStorage';
+import { getAssignedStudentIdsForOfficer, getAdmissionStatus, getOverallVerificationStatus, getVerificationProgress } from '../utils/verification';
 
-const EMPTY_FILTERS = { academicYear: '', programme: '', branch: '', category: '', verificationStatus: '', admissionStatus: '' };
+const EMPTY_FILTERS = { academicYear: '', programme: '', branch: '', category: '', verificationStatus: '', admissionStatus: '', assignedOfficer: '' };
 
 export default function StudentsPage() {
-  const { students, removeStudent } = useApp();
+  const { students, users, removeStudent } = useApp();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -21,12 +23,16 @@ export default function StudentsPage() {
     // Pre-apply filter from URL params set by Dashboard stat cards
     const vs = searchParams.get('verificationStatus') || '';
     const as_ = searchParams.get('admissionStatus') || '';
-    return { ...EMPTY_FILTERS, verificationStatus: vs, admissionStatus: as_ };
+    const programme = searchParams.get('programme') || '';
+    const assignedOfficer = searchParams.get('assignedOfficer') || '';
+    return { ...EMPTY_FILTERS, verificationStatus: vs, admissionStatus: as_, programme, assignedOfficer };
   });
   const [appliedFilters, setAppliedFilters] = useState(() => {
     const vs = searchParams.get('verificationStatus') || '';
     const as_ = searchParams.get('admissionStatus') || '';
-    return { ...EMPTY_FILTERS, verificationStatus: vs, admissionStatus: as_ };
+    const programme = searchParams.get('programme') || '';
+    const assignedOfficer = searchParams.get('assignedOfficer') || '';
+    return { ...EMPTY_FILTERS, verificationStatus: vs, admissionStatus: as_, programme, assignedOfficer };
   });
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(0);
@@ -47,22 +53,42 @@ export default function StudentsPage() {
   useEffect(() => { setPage(0); }, [search, appliedFilters]);
 
   const q = search.toLowerCase().trim();
-  const filtered = students.map(student => ({
-    ...student,
-    verificationStatus: getOverallVerificationStatus(student.id),
-  })).filter(s => {
+  const assignedStudentIds = user?.role === 'Faculty'
+    ? new Set(getAssignedStudentIdsForOfficer(user.id))
+    : null;
+  const filtered = students.filter(student =>
+    !assignedStudentIds || assignedStudentIds.has(student.id)
+  ).map(student => {
+    const assignment = getStudentOfficerAssignment(student.id);
+    return {
+      ...student,
+      verificationStatus: getOverallVerificationStatus(student.id),
+      admissionStatus: getAdmissionStatus(student),
+      verificationProgress: getVerificationProgress(student.id),
+      assignedOfficerIds: [
+        ...new Set([
+          assignment?.officerId,
+          ...Object.values(assignment?.stageAssignments || {}),
+        ].filter(Boolean)),
+      ],
+    };
+  }).filter(s => {
     const matchSearch = !q || [
       s.applicationNo, s.admissionNo, s.name, s.mobile, s.email
     ].some(v => v?.toLowerCase().includes(q));
 
-    const { academicYear, programme, branch, category, verificationStatus, admissionStatus } = appliedFilters;
+    const { academicYear, programme, branch, category, verificationStatus, admissionStatus, assignedOfficer } = appliedFilters;
     const matchFilters =
       (!academicYear       || s.academicYear === academicYear) &&
       (!programme          || s.programme === programme) &&
       (!branch             || s.branch === branch) &&
       (!category           || s.category === category) &&
       (!verificationStatus || s.verificationStatus === verificationStatus) &&
-      (!admissionStatus    || s.admissionStatus === admissionStatus);
+      (!admissionStatus    || s.admissionStatus === admissionStatus) &&
+      (!assignedOfficer ||
+        (assignedOfficer === 'Unassigned'
+          ? s.assignedOfficerIds.length === 0
+          : s.assignedOfficerIds.includes(assignedOfficer)));
 
     return matchSearch && matchFilters;
   });
@@ -76,7 +102,7 @@ export default function StudentsPage() {
 
   // CSV Export
   const exportCSV = () => {
-    const headers = ['App No.', 'Adm No.', 'Name', 'Programme', 'Branch', 'Category', 'Mobile', 'Email', 'Year', 'Verification', 'Admission'];
+    const headers = ['App No.', 'Adm No.', 'Name', 'Programme', 'Branch', 'Category', 'Mobile', 'Email', 'Year', 'Overall Verification', 'Admission'];
     const rows = filtered.map(s => [
       s.applicationNo, s.admissionNo, s.name, s.programme, s.branch,
       s.category, s.mobile, s.email, s.academicYear, s.verificationStatus, s.admissionStatus
@@ -142,6 +168,7 @@ export default function StudentsPage() {
           onChange={setFilters}
           onApply={() => { setAppliedFilters(filters); setPage(0); }}
           onClear={() => { setFilters(EMPTY_FILTERS); setAppliedFilters(EMPTY_FILTERS); }}
+          users={users}
           resultCount={filtered.length}
           totalCount={students.length}
         />

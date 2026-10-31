@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getStage1Verification, saveStage1Verification } from '../utils/localStorage';
+import { isVerificationStageAssignedToUser } from '../utils/localStorage';
+import { useAuth } from '../context/AuthContext';
 import { VERIFICATION_ITEMS } from '../utils/verification';
 import useVerificationItemFocus from '../hooks/useVerificationItemFocus';
 
@@ -13,6 +15,7 @@ export default function Stage1VerificationPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { showToast } = useApp();
+  const { user } = useAuth();
   useVerificationItemFocus(location.state?.focusItem);
   const [verification, setVerification] = useState(
     () => getStage1Verification(location.state?.recordId)[VERIFICATION_ITEM_KEY] || EMPTY_VERIFICATION
@@ -21,6 +24,11 @@ export default function Stage1VerificationPage() {
   const isSavingRef = useRef(false);
   const verifiedCount = verification.status === 'Yes' ? 1 : 0;
   const progress = verifiedCount * 100;
+  const canVerify = isVerificationStageAssignedToUser(location.state?.recordId, '1', user);
+
+  if (!canVerify) {
+    return <div className="card p-8 text-center"><p className="text-sm text-red-700">You are not assigned to verify Stage 1 for this student.</p></div>;
+  }
 
   const handleBack = () => {
     if (location.state?.returnToKey) {

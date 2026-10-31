@@ -21,7 +21,7 @@ function timeAgo(dateStr) {
 
 export default function Topbar({ onMenuToggle }) {
   const { user } = useAuth();
-  const { notifications, unreadCount, readAllNotifications } = useApp();
+  const { notifications, unreadCount, readAllNotifications, markNotificationAsRead } = useApp();
   const navigate = useNavigate();
   const [showNotifs, setShowNotifs] = useState(false);
   const [search, setSearch] = useState('');
@@ -87,19 +87,31 @@ export default function Topbar({ onMenuToggle }) {
                 <p className="text-sm font-semibold text-slate-800">Notifications</p>
                 <button onClick={() => setShowNotifs(false)}><X size={14} className="text-slate-400" /></button>
               </div>
-              <div className="max-h-72 overflow-y-auto">
+              <div className="max-h-96 overflow-y-auto">
                 {notifications.length === 0 && (
                   <p className="text-sm text-slate-400 text-center py-8">No notifications</p>
                 )}
                 {notifications.map(n => (
-                  <div key={n.id} className={`flex gap-3 px-4 py-3 border-b border-slate-50 hover:bg-slate-50 transition-colors ${!n.read ? 'bg-blue-50/40' : ''}`}>
+                  <button
+                    key={n.id}
+                    type="button"
+                    onClick={() => {
+                      markNotificationAsRead(n.id);
+                      setShowNotifs(false);
+                      if (n.studentId) navigate(`/students/${n.studentId}`);
+                    }}
+                    className={`flex w-full gap-3 px-4 py-3 border-b border-slate-50 text-left hover:bg-slate-50 transition-colors ${!n.read ? 'bg-blue-50/40' : ''}`}
+                  >
                     <span className="text-base flex-shrink-0 mt-0.5">{NOTIF_ICONS[n.type] || 'ℹ️'}</span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs text-slate-700 leading-relaxed">{n.message}</p>
-                      <p className="text-[10px] text-slate-400 mt-1">{timeAgo(n.createdAt)}</p>
+                      <p className="text-xs font-semibold text-slate-700 leading-relaxed">{n.title || n.message}</p>
+                      {n.title && <p className="text-xs text-slate-600 mt-0.5">{n.message}</p>}
+                      <p className="text-[10px] text-slate-400 mt-1" title={new Date(n.createdAt).toLocaleString()}>
+                        {new Date(n.createdAt).toLocaleString()} · {timeAgo(n.createdAt)}
+                      </p>
                     </div>
                     {!n.read && <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 mt-2" />}
-                  </div>
+                  </button>
                 ))}
               </div>
               <div className="px-4 py-2">

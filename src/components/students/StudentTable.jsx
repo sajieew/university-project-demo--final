@@ -38,7 +38,8 @@ export default function StudentTable({ students, onDelete, page, setPage }) {
               <th className="table-header">Programme</th>
               <th className="table-header">Branch</th>
               <th className="table-header">Year</th>
-              <th className="table-header">Verification</th>
+              <th className="table-header">Overall Verification</th>
+              <th className="table-header">Verification Progress</th>
               <th className="table-header">Admission</th>
               <th className="table-header text-center">Actions</th>
             </tr>
@@ -56,7 +57,49 @@ export default function StudentTable({ students, onDelete, page, setPage }) {
                 <td className="table-cell text-xs text-slate-600 max-w-36 truncate">{student.branch}</td>
                 <td className="table-cell text-xs text-slate-500">{student.academicYear}</td>
                 <td className="table-cell">
-                  <StatusBadge status={student.verificationStatus} />
+                  <button
+                    type="button"
+                    title="View verification breakdown"
+                    onClick={() => navigate(`/students/${student.id}`)}
+                    className="rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
+                  >
+                    <StatusBadge status={student.verificationStatus} />
+                  </button>
+                </td>
+                <td className="table-cell min-w-48">
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="font-medium text-slate-600">
+                      {student.verificationProgress.verifiedCount}/{student.verificationProgress.totalCount} documents · {student.verificationProgress.completedStageCount}/{student.verificationProgress.totalStageCount} stages
+                    </span>
+                    <span className="font-semibold text-slate-700">{student.verificationProgress.percentage}%</span>
+                  </div>
+                  <div
+                    className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"
+                    role="progressbar"
+                    aria-label={`${student.name} mandatory document verification`}
+                    aria-valuemin={0}
+                    aria-valuemax={student.verificationProgress.totalCount}
+                    aria-valuenow={student.verificationProgress.verifiedCount}
+                  >
+                    <div className="h-full rounded-full bg-blue-600" style={{ width: `${student.verificationProgress.percentage}%` }} />
+                  </div>
+                  <div className="mt-1 flex gap-1">
+                    {student.verificationProgress.stages.map(stage => (
+                      <span
+                        key={stage.id}
+                        title={`Stage ${stage.id}: ${stage.status}`}
+                        className={`rounded px-1 text-[9px] font-semibold ${
+                          stage.status === 'Completed'
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : stage.status === 'Rejected'
+                              ? 'bg-red-50 text-red-700'
+                              : 'bg-slate-100 text-slate-500'
+                        }`}
+                      >
+                        S{stage.id} {stage.status === 'Completed' ? 'Done' : stage.status === 'Rejected' ? 'Action' : 'Pending'}
+                      </span>
+                    ))}
+                  </div>
                 </td>
                 <td className="table-cell">
                   <StatusBadge status={student.admissionStatus} />

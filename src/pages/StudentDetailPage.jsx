@@ -1,9 +1,10 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Pencil, FileDown, Printer, Trash2, CheckCircle, Clock, Minus } from 'lucide-react';
-import { findStudent, normalizeVerificationStages } from '../utils/localStorage';
-import { getOverallVerificationStatus, getSavedStageStatus } from '../utils/verification';
+import { findStudent, getStudentOfficerAssignment, normalizeVerificationStages, VERIFICATION_UPDATED_EVENT } from '../utils/localStorage';
+import { getAdmissionStatus, getAssignedStudentIdsForOfficer, getOverallVerificationStatus, getVerificationBreakdown, getVerificationHistoryDetails, getVerificationProgress } from '../utils/verification';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import StatusBadge from '../components/ui/StatusBadge';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { downloadPDF, printPDF } from '../utils/pdfGenerator';
@@ -15,7 +16,8 @@ const signatureLabel = (signature) =>
 
 const STAGE_ICONS = {
   Completed: <CheckCircle size={16} className="text-emerald-500" />,
-  Pending:   <Clock size={16} className="text-red-500" />,
+  Pending:   <Clock size={16} className="text-amber-500" />,
+  Rejected:  <Clock size={16} className="text-red-500" />,
   NA:        <Minus size={16} className="text-slate-400" />,
 };
 
@@ -31,20 +33,47 @@ function DetailRow({ label, value }) {
 export default function StudentDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { removeStudent } = useApp();
+  const { removeStudent, users } = useApp();
+  const { user } = useAuth();
   const [student, setStudent]       = useState(null);
   const [showDelete, setShowDelete] = useState(false);
+  const [, setVerificationRevision] = useState(0);
 
   useEffect(() => {
     const s = findStudent(id);
     if (!s) navigate('/students');
+    else if (user?.role === 'Faculty' && !getAssignedStudentIdsForOfficer(user.id).includes(id)) navigate('/students');
     else setStudent(s);
+  }, [id, navigate, user]);
+
+  useEffect(() => {
+    const refreshVerification = () => {
+      setStudent(findStudent(id));
+      setVerificationRevision(revision => revision + 1);
+    };
+    window.addEventListener(VERIFICATION_UPDATED_EVENT, refreshVerification);
+    window.addEventListener('storage', refreshVerification);
+    return () => {
+      window.removeEventListener(VERIFICATION_UPDATED_EVENT, refreshVerification);
+      window.removeEventListener('storage', refreshVerification);
+    };
   }, [id]);
 
   if (!student) return null;
 
   const stages = normalizeVerificationStages(student.stages);
   const verificationStatus = getOverallVerificationStatus(student.id);
+  const verificationBreakdown = getVerificationBreakdown(student.id);
+  const verificationProgress = getVerificationProgress(student.id);
+  const verificationHistory = getVerificationHistoryDetails(student.id);
+  const assignment = getStudentOfficerAssignment(student.id);
+  const officers = [
+    assignment?.officerId,
+    ...Object.values(assignment?.stageAssignments || {}),
+  ].filter(Boolean);
+  const assignedOfficer = [...new Set(officers)]
+    .map(officerId => users.find(item => item.id === officerId)?.name)
+    .filter(Boolean);
 
   const handleDelete = () => {
     removeStudent(student.id);
@@ -69,18 +98,22 @@ export default function StudentDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => navigate(`/students/${student.id}/edit`)} className="btn-secondary btn-sm">
-            <Pencil size={13} /> Edit
-          </button>
+          {user?.role === 'Admin' && (
+            <button onClick={() => navigate(`/students/${student.id}/edit`)} className="btn-secondary btn-sm">
+              <Pencil size={13} /> Edit
+            </button>
+          )}
           <button onClick={() => downloadPDF(student)} className="btn-success btn-sm">
             <FileDown size={13} /> Download PDF
           </button>
           <button onClick={handlePrint} className="btn-secondary btn-sm">
             <Printer size={13} /> Print
           </button>
-          <button onClick={() => setShowDelete(true)} className="btn-danger btn-sm">
-            <Trash2 size={13} /> Delete
-          </button>
+          {user?.role === 'Admin' && (
+            <button onClick={() => setShowDelete(true)} className="btn-danger btn-sm">
+              <Trash2 size={13} /> Delete
+            </button>
+          )}
         </div>
       </div>
 
@@ -94,25 +127,56 @@ export default function StudentDetailPage() {
       {/* Status badges */}
       <div className="flex flex-wrap gap-2 no-print">
         <StatusBadge status={verificationStatus} />
-        <StatusBadge status={student.admissionStatus} />
+        <StatusBadge status={getAdmissionStatus(student)} />
       </div>
 
-      {/* Section A: Student Details */}
+      {/* Personal information */}
       <div className="card p-6">
-        <h2 className="section-title">Section A — Student Details</h2>
+        <h2 className="section-title">Personal Information</h2>
         <dl className="divide-y divide-slate-50">
-          <DetailRow label="Application No."        value={student.applicationNo} />
-          <DetailRow label="Admission No."          value={student.admissionNo} />
           <DetailRow label="Name of the Student"    value={student.name} />
           <DetailRow label="Date of Birth"          value={formatDate(student.dob)} />
           <DetailRow label="Gender"                 value={student.gender} />
+          <DetailRow label="Mobile Number"          value={student.mobile} />
+          <DetailRow label="Email ID"               value={student.email} />
+        </dl>
+      </div>
+
+      <div className="card p-6">
+        <h2 className="section-title">Academic Information</h2>
+        <dl className="divide-y divide-slate-50">
+          <DetailRow label="Application No."        value={student.applicationNo} />
+          <DetailRow label="Admission No."          value={student.admissionNo} />
           <DetailRow label="Programme Applied"      value={student.programme} />
           <DetailRow label="Branch / Specialization" value={student.branch} />
           <DetailRow label="Admission Category"     value={student.category} />
-          <DetailRow label="Mobile Number"          value={student.mobile} />
-          <DetailRow label="Email ID"               value={student.email} />
           <DetailRow label="Academic Year"          value={student.academicYear} />
         </dl>
+      </div>
+
+      <div className="card p-6">
+        <h2 className="section-title">Overall Verification Status</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <StatusBadge status={verificationStatus} className="text-sm" />
+        </div>
+      </div>
+
+      <div className="card p-6">
+        <h2 className="section-title">Verification Progress</h2>
+        <p className="text-sm font-semibold text-slate-600">
+          {verificationProgress.verifiedCount}/{verificationProgress.totalCount} mandatory documents · {verificationProgress.completedStageCount}/{verificationProgress.totalStageCount} stages complete · {verificationProgress.percentage}%
+        </p>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuemin={0} aria-valuemax={verificationProgress.totalCount} aria-valuenow={verificationProgress.verifiedCount} aria-label="Mandatory document verification progress">
+          <div className="h-full rounded-full bg-blue-600" style={{ width: `${verificationProgress.percentage}%` }} />
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {verificationProgress.stages.map(stage => (
+            <div key={stage.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-xs">
+              <span className="text-slate-600">Stage {stage.id}</span>
+              <StatusBadge status={stage.status} className="text-[10px]" />
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Section C: Verification Process */}
@@ -121,9 +185,10 @@ export default function StudentDetailPage() {
         <div className="space-y-3">
           {VERIFICATION_STAGES.map(stage => {
             const s = stages[stage.id] || { status: 'Pending' };
-            const status = getSavedStageStatus(stage.id, student.id);
+            const details = verificationBreakdown.find(item => item.id === String(stage.id));
+            const status = details?.status || 'Pending';
             return (
-              <div key={stage.id} className="flex items-start gap-4 py-2 border-b border-slate-50 last:border-0">
+              <div key={stage.id} className="flex flex-wrap items-start gap-4 py-2 border-b border-slate-50 last:border-0">
                 <div className="flex-shrink-0 mt-0.5">{STAGE_ICONS[status] || STAGE_ICONS.Pending}</div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-slate-700">{stage.id}. {stage.name}</p>
@@ -133,18 +198,79 @@ export default function StudentDetailPage() {
                     {s.remarks && <span className="text-xs text-slate-400">Remarks: {s.remarks}</span>}
                   </div>
                 </div>
-                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                  status === 'Completed'
-                    ? 'bg-emerald-50 text-emerald-700'
-                    : 'bg-red-50 text-red-700'
-                }`}>
-                  {status}
-                </span>
+                <StatusBadge status={status} />
+                <div className="w-full basis-full pl-8">
+                  <ul className="space-y-2 border-t border-slate-100 pt-2">
+                    {details?.items.map(item => (
+                      <li key={item.id} className="flex flex-wrap items-start justify-between gap-2 text-xs">
+                        <div className="min-w-0">
+                          <span className="text-slate-600">{item.label}</span>
+                          <span className={`ml-2 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            item.mandatory
+                              ? 'bg-slate-100 text-slate-600'
+                              : 'bg-blue-50 text-blue-700'
+                          }`}>
+                            {item.mandatory ? 'Mandatory' : 'Optional'}
+                          </span>
+                          {item.status === 'Rejected' && (item.remarks || details.remarks) && (
+                            <p className="mt-1 text-red-700">
+                              Rejection remarks: {item.remarks || details.remarks}
+                            </p>
+                          )}
+                        </div>
+                        <StatusBadge status={item.status} className="text-[10px]" />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             );
           })}
         </div>
       </div>
+
+      <section className="card p-6">
+        <h2 className="section-title">Verification History</h2>
+        {verificationHistory.length === 0 ? (
+          <p className="text-sm text-slate-400">No verification changes have been recorded.</p>
+        ) : (
+          <ol className="space-y-4">
+            {verificationHistory.map(entry => (
+              <li key={entry.id} className="relative border-l-2 border-slate-200 pl-4">
+                <span className={`absolute -left-[5px] top-1 h-2 w-2 rounded-full ${
+                  entry.updatedStatus === 'Rejected' ? 'bg-red-500' : 'bg-blue-500'
+                }`} />
+                <p className="text-sm font-semibold text-slate-700">
+                  {VERIFICATION_STAGES.find(stage => String(stage.id) === entry.stageId)?.name || `Stage ${entry.stageId}`} · {entry.documentName}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-600">
+                  {entry.previousStatus} → {entry.updatedStatus} · {entry.officerName}
+                </p>
+                <p className="text-[11px] text-slate-400">{new Date(entry.occurredAt).toLocaleString()}</p>
+                {entry.remarks && <p className="mt-1 text-xs text-slate-500">Remarks: {entry.remarks}</p>}
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
+      <section className="card p-6">
+        <h2 className="section-title">Assigned Verification Officer</h2>
+        <p className="text-sm text-slate-700">{assignedOfficer.join(', ') || 'Unassigned'}</p>
+        {assignment && Object.entries(assignment.stageAssignments || {}).map(([stageId, officerId]) => (
+          <p key={stageId} className="mt-1 text-xs text-slate-500">
+            Stage {stageId}: {users.find(item => item.id === officerId)?.name || 'Unassigned'}
+          </p>
+        ))}
+      </section>
+
+      <section className="card p-6">
+        <h2 className="section-title">Admission Status</h2>
+        <StatusBadge status={getAdmissionStatus(student)} className="text-sm" />
+        <DetailRow label="Admission Officer" value={student.approval?.officer} />
+        <DetailRow label="Approval Date" value={formatDate(student.approval?.date)} />
+        <DetailRow label="Remarks" value={student.approval?.remarks} />
+      </section>
 
       {/* Section D: Eligibility */}
       <div className="card p-6">
