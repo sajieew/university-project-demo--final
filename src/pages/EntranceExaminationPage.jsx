@@ -1,385 +1,544 @@
-import { useState } from 'react';
-import { Pencil, Printer, Save, UserRound } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
+import { AlertCircle, CheckCircle2, Pencil, Save, Trash2, Upload, X } from 'lucide-react';
+import { readSheet } from 'read-excel-file/browser';
+import { readFirstSheet } from 'xls-reader';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
+import { BRANCH_CONFIG } from '../utils/demoData';
 import {
+  KEYS,
+  deleteEntranceExaminationUpload,
+  getEntranceExaminationUpload,
   getEntranceExaminationTickets,
-  saveEntranceExaminationTicket,
+  saveModuleUploadFile,
+  saveEntranceExaminationUpload,
+  saveEntranceExaminationRecords,
+  updateEntranceExaminationRecord,
 } from '../utils/localStorage';
 
-const IMPORTANT_INSTRUCTIONS = 'Bring this hall ticket and a valid photo ID (Aadhaar Card/School ID). Arrive at the venue at least 30 minutes before the reporting time. Electronic gadgets, calculators and study materials are not permitted inside the examination hall. Follow all instructions given by the invigilator.';
+const REQUIRED_COLUMNS = [
+  {
+    key: 'name',
+    label: 'Student Name',
+    aliases: ['studentname', 'name', 'nameofstudent', 'nameofcandidate', 'candidatename'],
+  },
+  {
+    key: 'hallTicketNumber',
+    label: 'Hall Ticket Number',
+    aliases: ['hallticketnumber', 'hallticketno', 'hallticket', 'ticketnumber'],
+  },
+  {
+    key: 'numberOfCandidates',
+    label: 'Number of Candidates',
+    aliases: ['numberofcandidates', 'noofcandidates', 'candidatecount', 'candidates'],
+  },
+  {
+    key: 'dateOfBirth',
+    label: 'Date of Birth',
+    aliases: ['dateofbirth', 'dob', 'birthdate'],
+  },
+  {
+    key: 'courseApplied',
+    label: 'Course Applied',
+    aliases: ['courseapplied', 'course', 'programme', 'program'],
+  },
+  {
+    key: 'examDate',
+    label: 'Exam Date',
+    aliases: ['examdate', 'dateofexam'],
+  },
+  {
+    key: 'examTime',
+    label: 'Exam Time',
+    aliases: ['examtime', 'timeofexam'],
+  },
+  {
+    key: 'examVenue',
+    label: 'Exam Venue',
+    aliases: ['examvenue', 'venue', 'examinationvenue'],
+  },
+];
 
-const newTicket = (student) => ({
-  studentId: student.id,
-  hallTicketNumber: student.registerNo || student.admissionNo || '',
-  name: student.name || '',
-  dateOfBirth: student.dob || '',
-  courseApplied: [student.programme, student.branch].filter(Boolean).join(' '),
-  examDateTime: '',
-  examVenue: '',
-  photo: student.photo || student.photoUrl || '',
-  signature: '',
+const normalizeHeader = (value) => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+const normalizeIdentifier = (value) => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+const createId = () => globalThis.crypto?.randomUUID?.()
+  || `entrance-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+const cellToString = (value, key) => {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) {
+    return key === 'examTime'
+      ? value.toISOString().slice(11, 16)
+      : value.toISOString().slice(0, 10);
+  }
+  if (typeof value === 'number' && key === 'examTime') {
+    const minutes = Math.round(value * 24 * 60) % (24 * 60);
+    return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+  }
+  return String(value).trim();
+};
+
+const readSpreadsheet = async (file) => {
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  let rows;
+
+  if (extension === 'xls') {
+    const sheet = readFirstSheet(await file.arrayBuffer());
+    rows = sheet?.rows;
+  } else {
+    rows = await readSheet(file);
+  }
+
+  if (!rows?.length) throw new Error('The selected workbook does not contain a readable worksheet.');
+  const headerIndex = rows.findIndex(row => row.some(value => String(value ?? '').trim()));
+  if (headerIndex < 0) throw new Error('The selected worksheet is empty.');
+
+  const headers = rows[headerIndex].map(value => String(value ?? '').trim());
+  const columnIndexes = new Map();
+  REQUIRED_COLUMNS.forEach(column => {
+    const index = headers.findIndex(header => column.aliases.includes(normalizeHeader(header)));
+    if (index >= 0) columnIndexes.set(column.key, index);
+  });
+
+  const missingColumns = REQUIRED_COLUMNS
+    .filter(column => !columnIndexes.has(column.key))
+    .map(column => column.label);
+  if (missingColumns.length) {
+    throw new Error(`Missing required spreadsheet columns: ${missingColumns.join(', ')}.`);
+  }
+
+  const records = rows.slice(headerIndex + 1)
+    .map((row, rowIndex) => {
+      const record = Object.fromEntries(REQUIRED_COLUMNS.map(column => [
+        column.key,
+        cellToString(row[columnIndexes.get(column.key)], column.key),
+      ]));
+      if (Object.values(record).every(value => !value)) return null;
+
+      const missingValues = REQUIRED_COLUMNS
+        .filter(column => !record[column.key])
+        .map(column => column.label);
+      if (missingValues.length) {
+        throw new Error(`Spreadsheet row ${headerIndex + rowIndex + 2} is missing: ${missingValues.join(', ')}.`);
+      }
+      return record;
+    })
+    .filter(Boolean);
+
+  if (!records.length) throw new Error('The worksheet has a header row but no student records.');
+  return records;
+};
+
+const makeRecord = (record, department, academicYear) => ({
+  ...record,
+  id: createId(),
+  department,
+  academicYear,
+  identityKey: normalizeIdentifier(record.hallTicketNumber),
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
 });
 
-const displayDate = (date) => {
-  if (!date) return '';
-  const parsed = new Date(`${date}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? date : parsed.toLocaleDateString('en-GB');
+const getAcademicYearOptions = (students, records) => {
+  const currentYear = new Date().getFullYear();
+  const startYear = new Date().getMonth() >= 6 ? currentYear : currentYear - 1;
+  const currentYears = Array.from({ length: 7 }, (_, index) => {
+    const year = startYear - index;
+    return `${year}-${String(year + 1).slice(-2)}`;
+  });
+
+  return [...new Set([
+    ...currentYears,
+    ...students.map(student => student.academicYear),
+    ...records.map(record => record.academicYear),
+  ].filter(Boolean))].sort((a, b) => b.localeCompare(a));
+};
+
+const getLegacyRecord = (ticket, students) => {
+  const student = students.find(item => item.id === ticket.studentId);
+  if (!student) return null;
+  const [examDate = '', examTime = ''] = (ticket.examDateTime || '').split('T');
+  return {
+    ...ticket,
+    department: student.branch,
+    academicYear: student.academicYear,
+    name: ticket.name || student.name || '',
+    hallTicketNumber: ticket.hallTicketNumber || '',
+    numberOfCandidates: '',
+    dateOfBirth: ticket.dateOfBirth || student.dob || '',
+    courseApplied: ticket.courseApplied || '',
+    examDate,
+    examTime,
+    examVenue: ticket.examVenue || '',
+  };
 };
 
 export default function EntranceExaminationPage() {
   const { user } = useAuth();
   const { students, showToast } = useApp();
-  const isFaculty = user?.role === 'Faculty';
-  const [tickets, setTickets] = useState(() => getEntranceExaminationTickets());
-  const [selectedStudentId, setSelectedStudentId] = useState('');
-  const [candidateSearch, setCandidateSearch] = useState('');
-  const [form, setForm] = useState(null);
-  const [editing, setEditing] = useState(false);
+  const canManageRecords = user?.role === 'Faculty' || user?.role === 'Admin';
+  const fileInputRef = useRef(null);
+  const [records, setRecords] = useState(() => getEntranceExaminationTickets());
+  const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [department, setDepartment] = useState('');
+  const [academicYear, setAcademicYear] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDeletingUploadedFile, setIsDeletingUploadedFile] = useState(false);
+  const [message, setMessage] = useState(null);
+  const [editingId, setEditingId] = useState('');
+  const [editedRecord, setEditedRecord] = useState(null);
 
-  const availableStudents = students;
-  const matchingStudents = availableStudents.filter(student =>
-    `${student.name || ''} ${student.applicationNo || ''}`
-      .toLowerCase()
-      .includes(candidateSearch.trim().toLowerCase())
+  const departmentOptions = useMemo(() => [...new Set([
+    ...BRANCH_CONFIG.map(branch => branch.name),
+    ...students.map(student => student.branch),
+    ...records.map(record => record.department),
+  ].filter(Boolean))].sort(), [records, students]);
+  const academicYearOptions = useMemo(
+    () => getAcademicYearOptions(students, records),
+    [records, students]
   );
-  const activeStudentId = availableStudents.some(student => student.id === selectedStudentId)
-    ? selectedStudentId
-    : availableStudents[0]?.id || '';
-  const selectedStudent = students.find(student => student.id === activeStudentId);
-  const savedTicket = tickets.find(ticket => ticket.studentId === activeStudentId);
-  const displayForm = form || (
-    selectedStudent
-      ? savedTicket
-        ? { ...newTicket(selectedStudent), ...savedTicket }
-        : newTicket(selectedStudent)
-      : null
-  );
-  const isEditing = isFaculty && (editing || !savedTicket);
+  const displayedRecords = useMemo(() => {
+    const legacy = records
+      .filter(record => !record.department || !record.academicYear)
+      .map(record => getLegacyRecord(record, students))
+      .filter(Boolean);
+    return [...records.filter(record => record.department && record.academicYear), ...legacy]
+      .filter(record => record.department === department && record.academicYear === academicYear);
+  }, [academicYear, department, records, students]);
+  const savedUploadReference = department && academicYear
+    ? uploadedFiles.find(item => item.department === department && item.academicYear === academicYear)
+      || getEntranceExaminationUpload(department, academicYear)
+    : null;
+  const uploadedFileName = savedUploadReference?.fileName || '';
 
-  const selectStudent = (studentId) => {
-    const student = students.find(item => item.id === studentId);
-    const ticket = tickets.find(item => item.studentId === studentId);
-    setSelectedStudentId(studentId);
-    setForm(student ? ticket ? { ...newTicket(student), ...ticket } : newTicket(student) : null);
-    setEditing(isFaculty && !ticket);
+  const handleFileChange = (event) => {
+    const file = event.target.files?.[0] || null;
+    setSelectedFile(file);
+    setMessage(null);
+    if (file && !/\.(xlsx|xls)$/i.test(file.name)) {
+      setSelectedFile(null);
+      event.target.value = '';
+      setMessage({ type: 'error', text: 'Choose a student spreadsheet in .xlsx or .xls format.' });
+    }
   };
 
-  const handleStudentChange = (event) => selectStudent(event.target.value);
-
-  const updateForm = (field, value) => {
-    setForm(current => ({ ...(current || displayForm), [field]: value }));
-  };
-
-  const handlePhotoChange = (event) => {
-    if (!isFaculty || !isEditing) return;
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      showToast('Choose an image file for the candidate photo.', 'error');
-      event.target.value = '';
-      return;
-    }
-    if (file.size > 1024 * 1024) {
-      showToast('The candidate photo must be smaller than 1 MB.', 'error');
-      event.target.value = '';
+  const handleUpload = async () => {
+    if (!canManageRecords) return;
+    if (!department || !academicYear || !selectedFile) {
+      setMessage({ type: 'error', text: 'Select a department, academic year, and spreadsheet before uploading.' });
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => updateForm('photo', String(reader.result));
-    reader.onerror = () => showToast('Unable to read the candidate photo.', 'error');
-    reader.readAsDataURL(file);
-  };
-
-  const handleSignatureChange = (event) => {
-    if (!isFaculty || !isEditing) return;
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      showToast('Choose an image file for the candidate signature.', 'error');
-      event.target.value = '';
-      return;
-    }
-    if (file.size > 1024 * 1024) {
-      showToast('The candidate signature must be smaller than 1 MB.', 'error');
-      event.target.value = '';
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => updateForm('signature', String(reader.result));
-    reader.onerror = () => showToast('Unable to read the candidate signature.', 'error');
-    reader.readAsDataURL(file);
-  };
-
-  const handleSave = () => {
-    if (!isFaculty) {
-      showToast('Only faculty can save entrance examination hall tickets.', 'error');
-      return;
-    }
-    if (
-      !selectedStudent
-      || !displayForm?.hallTicketNumber.trim()
-      || !displayForm?.name.trim()
-      || !displayForm?.dateOfBirth
-      || !displayForm?.courseApplied.trim()
-      || !displayForm?.examDateTime.trim()
-      || !displayForm?.examVenue.trim()
-    ) {
-      showToast('Complete all hall ticket details before saving.', 'error');
-      return;
-    }
-
+    setIsUploading(true);
+    setMessage(null);
     try {
-      const saved = saveEntranceExaminationTicket({
-        ...displayForm,
-        studentId: selectedStudent.id,
+      const spreadsheetRecords = await readSpreadsheet(selectedFile);
+      const uniqueRecords = [...new Map(
+        spreadsheetRecords.map(record => {
+          const entry = makeRecord(record, department, academicYear);
+          return [`${entry.department}\u0000${entry.academicYear}\u0000${entry.identityKey}`, entry];
+        })
+      ).values()];
+      const existingKeys = new Set(
+        records
+          .filter(record => record.department === department && record.academicYear === academicYear)
+          .map(record => `${record.department}\u0000${record.academicYear}\u0000${record.identityKey}`)
+      );
+      const updatedCount = uniqueRecords.filter(record =>
+        existingKeys.has(`${record.department}\u0000${record.academicYear}\u0000${record.identityKey}`)
+      ).length;
+      await saveModuleUploadFile(KEYS.ENTRANCE_EXAMINATION_TICKETS, department, academicYear, selectedFile);
+      const saved = saveEntranceExaminationRecords(uniqueRecords, user.role);
+      const savedFiles = saveEntranceExaminationUpload(department, academicYear, selectedFile.name);
+      setRecords(saved);
+      setUploadedFiles(savedFiles);
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      const successMessage = `Uploaded ${uniqueRecords.length} student record${uniqueRecords.length === 1 ? '' : 's'}: ${uniqueRecords.length - updatedCount} new, ${updatedCount} updated.`;
+      setMessage({ type: 'success', text: successMessage });
+      setEditingId('');
+      setEditedRecord(null);
+      showToast('Entrance examination spreadsheet uploaded successfully.', 'success');
+    } catch (error) {
+      console.error('Unable to upload entrance examination spreadsheet.', error);
+      const errorMessage = error instanceof Error
+        ? `Upload failed: ${error.message}`
+        : 'Upload failed while reading or saving the spreadsheet.';
+      setMessage({ type: 'error', text: errorMessage });
+      showToast(errorMessage, 'error');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleDeleteUploadedFile = async () => {
+    const hasUploadedFile = Boolean(uploadedFileName);
+    const confirmation = hasUploadedFile
+      ? 'Delete the uploaded file? Existing student records will remain unchanged.'
+      : 'Clear the selected file?';
+    if (!window.confirm(confirmation)) return;
+    setIsDeletingUploadedFile(true);
+    try {
+      if (hasUploadedFile) {
+        const savedFiles = await deleteEntranceExaminationUpload(department, academicYear);
+        setUploadedFiles(savedFiles);
+      }
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      const successMessage = hasUploadedFile
+        ? 'Uploaded file removed. Existing student records were kept.'
+        : 'Selected file cleared.';
+      setMessage({ type: 'success', text: successMessage });
+      showToast(successMessage, 'success');
+    } catch (error) {
+      console.error('Unable to delete entrance examination file.', error);
+      const text = error instanceof Error ? error.message : 'Unable to delete the uploaded file.';
+      setMessage({ type: 'error', text });
+      showToast(text, 'error');
+    } finally {
+      setIsDeletingUploadedFile(false);
+    }
+  };
+
+  const saveEditedRecord = () => {
+    if (!editedRecord) return;
+    try {
+      const saved = updateEntranceExaminationRecord({
+        ...editedRecord,
+        identityKey: normalizeIdentifier(editedRecord.hallTicketNumber),
         updatedAt: new Date().toISOString(),
       }, user.role);
-      setTickets(saved);
-      setForm(saved.find(ticket => ticket.studentId === selectedStudent.id));
-      setEditing(false);
-      showToast('Entrance examination hall ticket saved.', 'success');
+      setRecords(saved);
+      setEditingId('');
+      setEditedRecord(null);
+      setMessage({ type: 'success', text: 'Entrance examination record updated.' });
+      showToast('Entrance examination record updated.', 'success');
     } catch (error) {
-      console.error('Unable to save entrance examination hall ticket.', error);
-      showToast(error.message || 'Unable to save the hall ticket.', 'error');
+      console.error('Unable to update entrance examination record.', error);
+      const errorMessage = error instanceof Error
+        ? error.message
+        : 'Unable to update entrance examination record.';
+      setMessage({ type: 'error', text: errorMessage });
+      showToast(errorMessage, 'error');
     }
   };
 
   return (
-    <div className="entrance-examination-page animate-fade-in space-y-5">
-      <style>{`
-        @media print {
-          @page { size: landscape; margin: 10mm; }
-          body * { visibility: hidden !important; }
-          .entrance-ticket, .entrance-ticket * { visibility: visible !important; }
-          .entrance-ticket {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            margin: 0 !important;
-            print-color-adjust: exact !important;
-            -webkit-print-color-adjust: exact !important;
-          }
-        }
-      `}</style>
-
-      <div className="no-print flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-800">Entrance Examination</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {isFaculty ? 'Create, edit, view, and print entrance examination hall tickets.' : 'View and print saved entrance examination hall tickets.'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {isFaculty && selectedStudent && savedTicket && !editing && (
-            <button type="button" onClick={() => setEditing(true)} className="btn-secondary btn-sm">
-              <Pencil size={14} /> Edit
-            </button>
-          )}
-          {isEditing && (
-            <button type="button" onClick={handleSave} className="btn-primary btn-sm">
-              <Save size={14} /> Save Hall Ticket
-            </button>
-          )}
-          {selectedStudent && (
-            <button type="button" onClick={() => window.print()} className="btn-secondary btn-sm">
-              <Printer size={14} /> Print
-            </button>
-          )}
-        </div>
+    <div className="animate-fade-in space-y-5">
+      <div>
+        <h1 className="text-xl font-bold text-slate-800">Entrance Examination</h1>
+        <p className="mt-1 text-sm text-slate-500">Upload and view student entrance examination details.</p>
       </div>
 
-      <div className="no-print card p-4">
-        {isFaculty && (
-          <div className="mb-4">
-            <label htmlFor="entrance-candidate-search" className="label">Candidate Search</label>
-            <input
-              id="entrance-candidate-search"
-              type="search"
-              className="input-field max-w-xl"
-              placeholder="Search by name or Application Number"
-              value={candidateSearch}
-              onChange={event => setCandidateSearch(event.target.value)}
-            />
-            {candidateSearch.trim() && (
-              matchingStudents.length ? (
-                <div className="mt-2 flex max-h-48 max-w-xl flex-col gap-1 overflow-y-auto">
-                  {matchingStudents.map(student => (
-                    <button
-                      key={student.id}
-                      type="button"
-                      onClick={() => selectStudent(student.id)}
-                      className="input-field text-left"
-                    >
-                      {student.name} — {student.applicationNo || student.admissionNo || student.id}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-2 text-sm text-slate-500">No candidates found.</p>
-              )
-            )}
+      <section className="card space-y-5 p-5">
+        <h2 className="section-title">1. Select Department &amp; Academic Year</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="entrance-department" className="label">Select Department</label>
+            <select
+              id="entrance-department"
+              className="input-field"
+              value={department}
+              onChange={event => {
+                setDepartment(event.target.value);
+                setMessage(null);
+              }}
+            >
+              <option value="">Choose a department</option>
+              {departmentOptions.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="entrance-academic-year" className="label">Select Academic Year</label>
+            <select
+              id="entrance-academic-year"
+              className="input-field"
+              value={academicYear}
+              onChange={event => {
+                setAcademicYear(event.target.value);
+                setMessage(null);
+              }}
+            >
+              <option value="">Choose an academic year</option>
+              {academicYearOptions.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section className="card space-y-5 p-5">
+        <div>
+          <h2 className="section-title">2. Upload Student Spreadsheet</h2>
+          <p className="mt-1 text-xs text-slate-500">Required columns: Student Name, Hall Ticket Number, Number of Candidates, Date of Birth, Course Applied, Exam Date, Exam Time, Exam Venue.</p>
+        </div>
+
+        {canManageRecords && (
+          <>
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                className="sr-only"
+                onChange={handleFileChange}
+              />
+              <span className="min-w-0 flex-1 truncate text-sm text-slate-500" aria-live="polite">
+                {selectedFile
+                  ? uploadedFileName ? `Selected: ${selectedFile.name} (replacing ${uploadedFileName})` : selectedFile.name
+                  : uploadedFileName || 'No file selected'}
+              </span>
+              {(selectedFile || uploadedFileName) && (
+                <button
+                  type="button"
+                  className="btn-secondary btn-sm text-red-600"
+                  onClick={handleDeleteUploadedFile}
+                  disabled={isUploading || isDeletingUploadedFile}
+                  aria-label="Delete uploaded file"
+                  title="Delete uploaded file"
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                  Delete File
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn-primary btn-sm"
+                onClick={() => selectedFile ? handleUpload() : fileInputRef.current?.click()}
+                disabled={isUploading || !department || !academicYear}
+              >
+                <Upload size={14} />
+                {isUploading ? 'Uploading...' : 'Upload'}
+              </button>
+            </div>
+            <p className="text-xs text-slate-400">Supported spreadsheet formats: .xlsx and .xls.</p>
+          </>
+        )}
+
+        {message && (
+          <div
+            role={message.type === 'error' ? 'alert' : 'status'}
+            className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${
+              message.type === 'error'
+                ? 'border-red-200 bg-red-50 text-red-700'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+            }`}
+          >
+            {message.type === 'error'
+              ? <AlertCircle size={17} className="mt-0.5 shrink-0" />
+              : <CheckCircle2 size={17} className="mt-0.5 shrink-0" />}
+            <span>{message.text}</span>
           </div>
         )}
-        {!isFaculty && <label htmlFor="entrance-ticket-student" className="label">Candidate</label>}
-        {!isFaculty && availableStudents.length ? (
-          <select
-            id="entrance-ticket-student"
-            className="input-field max-w-xl"
-            value={activeStudentId}
-            onChange={handleStudentChange}
-          >
-            {availableStudents.map(student => (
-              <option key={student.id} value={student.id}>
-                {student.name} — {student.applicationNo || student.admissionNo || student.id}
-              </option>
-            ))}
-          </select>
-        ) : !isFaculty && (
-          <p className="text-sm text-slate-500">
-            No entrance examination hall tickets have been saved yet.
-          </p>
-        )}
-        {isFaculty && !availableStudents.length && (
-          <p className="text-sm text-slate-500">No candidate records are available.</p>
-        )}
-      </div>
 
-      {selectedStudent && displayForm && (isFaculty || savedTicket) ? (
-        <div className={`grid items-start gap-5 ${isEditing ? 'xl:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]' : 'grid-cols-1'}`}>
-          {isEditing && (
-            <section className="no-print card space-y-4 p-5">
-              <h2 className="section-title">Hall Ticket Details</h2>
-              <div>
-                <label htmlFor="entrance-hall-ticket-number" className="label">Hall Ticket Number</label>
-                <input id="entrance-hall-ticket-number" className="input-field" value={displayForm.hallTicketNumber || ''} onChange={event => updateForm('hallTicketNumber', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="entrance-candidate-name" className="label">Name of Candidate</label>
-                <input id="entrance-candidate-name" className="input-field" value={displayForm.name || ''} onChange={event => updateForm('name', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="entrance-date-of-birth" className="label">Date of Birth</label>
-                <input id="entrance-date-of-birth" type="date" className="input-field" value={displayForm.dateOfBirth || ''} onChange={event => updateForm('dateOfBirth', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="entrance-course" className="label">Course Applied</label>
-                <input id="entrance-course" className="input-field" value={displayForm.courseApplied || ''} onChange={event => updateForm('courseApplied', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="entrance-exam-date-time" className="label">Exam Date &amp; Time</label>
-                <input id="entrance-exam-date-time" className="input-field" value={displayForm.examDateTime || ''} onChange={event => updateForm('examDateTime', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="entrance-exam-venue" className="label">Exam Venue</label>
-                <input id="entrance-exam-venue" className="input-field" value={displayForm.examVenue || ''} onChange={event => updateForm('examVenue', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="entrance-candidate-photo" className="label">Candidate Photo</label>
-                <input id="entrance-candidate-photo" type="file" accept="image/*" className="input-field" onChange={handlePhotoChange} />
-                <p className="mt-1 text-xs text-slate-400">Image files up to 1 MB.</p>
-              </div>
-              <div>
-                <label htmlFor="entrance-candidate-signature" className="label">Candidate Signature</label>
-                <input id="entrance-candidate-signature" type="file" accept="image/*" className="input-field" onChange={handleSignatureChange} />
-                <p className="mt-1 text-xs text-slate-400">Image files up to 1 MB.</p>
-              </div>
-            </section>
-          )}
-
-          <article className="entrance-ticket min-w-0 w-full rounded-2xl border-[7px] border-[#14528a] bg-[#d0eafb] p-2 text-[#17456c] shadow-sm">
-            <div className="overflow-hidden rounded-xl border border-[#8cb7d4] bg-white">
-              <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 bg-white px-3 py-3 sm:gap-4 sm:px-5">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full border-[3px] border-[#1b547d] text-center text-[9px] font-black leading-tight text-[#1b547d] sm:h-16 sm:w-16 sm:text-xs">
-                  KVELL
-                </div>
-                <div className="min-w-0 text-center">
-                  <h2 className="text-xs font-extrabold leading-tight sm:text-lg">
-                    KARPAGA VINAYAGA COLLEGE OF ENGINEERING AND TECHNOLOGY.
-                  </h2>
-                  <p className="text-[9px] font-semibold sm:text-xs">(Approved by AICTE, New Delhi, Accredited by NAAC)</p>
-                  <p className="mt-0.5 text-[9px] font-bold leading-tight sm:text-sm">
-                    KARPAGA VINAYAGA EDUCATIONAL LORE FOR LEARNING (DEEMED TO BE UNIVERSITY)
-                  </p>
-                  <p className="text-[8px] leading-relaxed sm:text-xs">
-                    GST Road, Chinnakolambakkam, Padalam – 603 308, Madurantakam (Tk), Chengalpattu District
-                    <br />044 - 7156 6373 or email us at kvelladmission2026@gmail.com
-                  </p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-full border-[3px] border-[#1b547d] text-center text-[8px] font-black leading-tight text-[#1b547d] sm:h-16 sm:w-16 sm:text-[10px]">
-                  KVELL
-                </div>
-              </header>
-
-              <h3 className="bg-white px-3 pb-1 text-center text-sm font-extrabold leading-tight sm:px-5 sm:text-2xl">
-                ENTRANCE EXAMINATION 2026 - HALL TICKET
-              </h3>
-
-              <div className="grid grid-cols-1 gap-2 px-2 pb-3 sm:grid-cols-[minmax(0,1fr)_minmax(120px,22%)] sm:gap-3 sm:px-4 sm:pb-4">
-                <div className="grid grid-cols-1 overflow-hidden border border-black sm:grid-cols-3">
-                  <div className="border-b border-black sm:border-r">
-                    <p className="bg-[#c6e7f5] px-2 py-1 text-center text-xs font-bold">Hall Ticket Number</p>
-                    <p className="min-h-8 border-t border-black px-2 py-2 text-xs">{displayForm.hallTicketNumber || ' '}</p>
-                  </div>
-                  <div className="border-b border-black sm:border-r">
-                    <p className="bg-[#c6e7f5] px-2 py-1 text-center text-xs font-bold">Name of Candidate</p>
-                    <p className="min-h-8 border-t border-black px-2 py-2 text-xs">{displayForm.name || ' '}</p>
-                  </div>
-                  <div className="border-b border-black sm:border-b-0">
-                    <p className="bg-[#c6e7f5] px-2 py-1 text-center text-xs font-bold">Date of Birth</p>
-                    <p className="min-h-8 border-t border-black px-2 py-2 text-xs">{displayDate(displayForm.dateOfBirth) || ' '}</p>
-                  </div>
-                  <div className="border-b border-black sm:border-r">
-                    <p className="bg-[#c6e7f5] px-2 py-1 text-center text-xs font-bold">Course Applied</p>
-                    <p className="min-h-8 border-t border-black px-2 py-2 text-xs">{displayForm.courseApplied || ' '}</p>
-                  </div>
-                  <div className="border-b border-black sm:border-r">
-                    <p className="bg-[#c6e7f5] px-2 py-1 text-center text-xs font-bold">Exam Date &amp; Time</p>
-                    <p className="min-h-8 border-t border-black px-2 py-2 text-xs">{displayForm.examDateTime || ' '}</p>
-                  </div>
-                  <div className="border-b border-black sm:border-b-0">
-                    <p className="bg-[#c6e7f5] px-2 py-1 text-center text-xs font-bold">Exam Venue</p>
-                    <p className="min-h-8 border-t border-black px-2 py-2 text-xs">{displayForm.examVenue || ' '}</p>
-                  </div>
-                  <div className="col-span-full px-2 py-2 text-[10px] leading-relaxed sm:text-xs">
-                    <p className="font-bold">Important Instructions:</p>
-                    <p>{IMPORTANT_INSTRUCTIONS}</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 items-start gap-2 sm:grid-cols-1 sm:gap-1">
-                  <div className="flex h-32 items-center justify-center border border-black bg-white text-center text-xs font-bold sm:h-28 md:h-36">
-                    {displayForm.photo ? (
-                      <img src={displayForm.photo} alt={`Candidate ${displayForm.name}`} className="h-full w-full object-cover" />
-                    ) : (
-                      <span className="flex flex-col items-center"><UserRound size={24} className="mb-1" />PHOTO</span>
-                    )}
-                  </div>
-                  <div className="text-center">
-                    <div className="h-7 rounded-lg border border-black bg-white">
-                      {displayForm.signature && (
-                        <img src={displayForm.signature} alt={`Signature of ${displayForm.name}`} className="h-full w-full rounded-lg object-contain" />
-                      )}
-                    </div>
-                    <p className="text-[10px] font-bold sm:text-xs">Candidate Signature</p>
-                  </div>
-                  <div className="col-span-2 text-center sm:col-span-1 sm:mt-auto">
-                    <div className="h-7 rounded-lg border border-black bg-white" />
-                    <p className="text-[10px] font-bold sm:text-xs">Nodal Officer-KVELL</p>
-                  </div>
-                </div>
-              </div>
+        <div className="overflow-hidden rounded-xl border border-slate-200">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-800">Student Examination Records</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                {department && academicYear
+                  ? `${department} · ${academicYear}`
+                  : 'Select a department and academic year to view records'}
+              </p>
             </div>
-          </article>
+            {department && academicYear && (
+              <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
+                {displayedRecords.length} record{displayedRecords.length === 1 ? '' : 's'}
+              </span>
+            )}
+          </div>
+
+          {!department || !academicYear ? (
+            <p className="px-5 py-8 text-center text-sm text-slate-500">
+              Choose a department and academic year to see student examination details.
+            </p>
+          ) : displayedRecords.length === 0 ? (
+            <p className="px-5 py-8 text-center text-sm text-slate-500">
+              No examination records have been uploaded for this selection.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-max text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th scope="col" className="px-4 py-3">S.No.</th>
+                    {REQUIRED_COLUMNS.map(column => (
+                      <th scope="col" key={column.key} className="px-4 py-3">{column.label}</th>
+                    ))}
+                    {canManageRecords && <th scope="col" className="px-4 py-3">Actions</th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {displayedRecords.map((record, index) => {
+                    const isEditing = editingId === record.id;
+                    return (
+                      <tr key={record.id || `${record.hallTicketNumber}-${index}`} className="align-top text-slate-700">
+                        <td className="px-4 py-3 font-medium">{index + 1}</td>
+                        {REQUIRED_COLUMNS.map(column => (
+                          <td key={column.key} className="max-w-64 px-4 py-3">
+                            {isEditing ? (
+                              <input
+                                aria-label={`${column.label} for ${record.name || record.hallTicketNumber}`}
+                                type={column.key === 'dateOfBirth' || column.key === 'examDate'
+                                  ? 'date'
+                                  : column.key === 'examTime'
+                                    ? 'time'
+                                    : 'text'}
+                                className="input-field min-w-40 py-1.5 text-xs"
+                                value={editedRecord?.[column.key] || ''}
+                                onChange={event => setEditedRecord(current => ({
+                                  ...current,
+                                  [column.key]: event.target.value,
+                                }))}
+                              />
+                            ) : (
+                              record[column.key] || '—'
+                            )}
+                          </td>
+                        ))}
+                        {canManageRecords && (
+                          <td className="px-4 py-3">
+                            {isEditing ? (
+                              <div className="flex items-center gap-1">
+                                <button type="button" className="btn-primary btn-sm" onClick={saveEditedRecord}>
+                                  <Save size={13} /> Save
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-secondary btn-sm"
+                                  onClick={() => {
+                                    setEditingId('');
+                                    setEditedRecord(null);
+                                  }}
+                                  aria-label="Cancel editing"
+                                >
+                                  <X size={13} />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn-secondary btn-sm"
+                                onClick={() => {
+                                  setEditingId(record.id);
+                                  setEditedRecord({ ...record });
+                                  setMessage(null);
+                                }}
+                              >
+                                <Pencil size={13} /> Edit
+                              </button>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-      ) : selectedStudent && !isFaculty ? (
-        <p className="card p-5 text-sm text-slate-500">
-          No entrance examination hall ticket has been saved for this student.
-        </p>
-      ) : null}
+      </section>
     </div>
   );
 }

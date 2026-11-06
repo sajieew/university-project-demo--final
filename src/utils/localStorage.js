@@ -7,6 +7,9 @@ export const KEYS = {
   STAGE1_VERIFICATION: 'uniportal_stage1_verification',
   PROVISIONAL_ALLOTMENTS: 'uniportal_provisional_allotments',
   ENTRANCE_EXAMINATION_TICKETS: 'uniportal_entrance_examination_tickets',
+  PROVISIONAL_ALLOTMENT_UPLOADS: 'uniportal_provisional_allotment_uploads',
+  ENTRANCE_EXAMINATION_UPLOADS: 'uniportal_entrance_examination_uploads',
+  RANK_STATEMENT_UPLOADS: 'uniportal_rank_statement_uploads',
   RANK_STATEMENTS: 'uniportal_rank_statements',
   VERIFICATION_ASSIGNMENTS: 'uniportal_verification_assignments',
   DUPLICATE_OVERRIDES: 'uniportal_duplicate_overrides',
@@ -39,6 +42,135 @@ export const setItem = (key, value) => {
   }
 };
 
+const getUploadReferences = (key) => {
+  const references = getItem(key);
+  return Array.isArray(references) ? references : [];
+};
+
+const saveUploadReference = (key, department, academicYear, fileName) => {
+  const references = getUploadReferences(key).filter(reference =>
+    reference.department !== department || reference.academicYear !== academicYear
+  );
+  const updated = [...references, {
+    department,
+    academicYear,
+    fileName,
+    updatedAt: new Date().toISOString(),
+  }];
+  try {
+    localStorage.setItem(key, JSON.stringify(updated));
+    return updated;
+  } catch (error) {
+    console.error('Unable to save uploaded file reference.', error);
+    throw new Error('Unable to save the uploaded file name in this browser.');
+  }
+};
+
+const UPLOAD_DATABASE = 'uniportal-module-uploads';
+const UPLOAD_OBJECT_STORE = 'uploads';
+
+const openUploadDatabase = () => new Promise((resolve, reject) => {
+  if (typeof indexedDB === 'undefined') {
+    reject(new Error('This browser does not support persistent uploaded files.'));
+    return;
+  }
+
+  const request = indexedDB.open(UPLOAD_DATABASE, 1);
+  request.onupgradeneeded = () => {
+    if (!request.result.objectStoreNames.contains(UPLOAD_OBJECT_STORE)) {
+      request.result.createObjectStore(UPLOAD_OBJECT_STORE, { keyPath: 'id' });
+    }
+  };
+  request.onsuccess = () => resolve(request.result);
+  request.onerror = () => reject(new Error('Unable to open uploaded file storage.'));
+});
+
+const getUploadStorageId = (moduleKey, department, academicYear) =>
+  `${moduleKey}\u0000${department}\u0000${academicYear}`;
+
+export const saveModuleUploadFile = async (moduleKey, department, academicYear, file) => {
+  const database = await openUploadDatabase();
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(UPLOAD_OBJECT_STORE, 'readwrite');
+      transaction.objectStore(UPLOAD_OBJECT_STORE).put({
+        id: getUploadStorageId(moduleKey, department, academicYear),
+        fileName: file.name,
+        file,
+      });
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(new Error('Unable to save the uploaded file.'));
+      transaction.onabort = () => reject(new Error('Unable to save the uploaded file.'));
+    });
+  } catch (error) {
+    console.error('Unable to save uploaded file.', error);
+    throw error instanceof Error ? error : new Error('Unable to save the uploaded file.');
+  } finally {
+    database.close();
+  }
+};
+
+export const deleteModuleUploadFile = async (moduleKey, department, academicYear) => {
+  const database = await openUploadDatabase();
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(UPLOAD_OBJECT_STORE, 'readwrite');
+      transaction.objectStore(UPLOAD_OBJECT_STORE).delete(
+        getUploadStorageId(moduleKey, department, academicYear)
+      );
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(new Error('Unable to delete the uploaded file.'));
+      transaction.onabort = () => reject(new Error('Unable to delete the uploaded file.'));
+    });
+  } catch (error) {
+    console.error('Unable to delete uploaded file.', error);
+    throw error instanceof Error ? error : new Error('Unable to delete the uploaded file.');
+  } finally {
+    database.close();
+  }
+};
+
+const getUploadReference = (key, department, academicYear) =>
+  getUploadReferences(key).find(reference =>
+    reference.department === department && reference.academicYear === academicYear
+  ) || null;
+
+const deleteUploadReference = (key, department, academicYear) =>
+  saveUploadReference(key, department, academicYear, null);
+
+export const getProvisionalAllotmentUpload = (department, academicYear) =>
+  getUploadReference(KEYS.PROVISIONAL_ALLOTMENT_UPLOADS, department, academicYear);
+
+export const saveProvisionalAllotmentUpload = (department, academicYear, fileName) =>
+  saveUploadReference(KEYS.PROVISIONAL_ALLOTMENT_UPLOADS, department, academicYear, fileName);
+
+export const deleteProvisionalAllotmentUpload = async (department, academicYear) => {
+  await deleteModuleUploadFile(KEYS.PROVISIONAL_ALLOTMENTS, department, academicYear);
+  return deleteUploadReference(KEYS.PROVISIONAL_ALLOTMENT_UPLOADS, department, academicYear);
+};
+
+export const getEntranceExaminationUpload = (department, academicYear) =>
+  getUploadReference(KEYS.ENTRANCE_EXAMINATION_UPLOADS, department, academicYear);
+
+export const saveEntranceExaminationUpload = (department, academicYear, fileName) =>
+  saveUploadReference(KEYS.ENTRANCE_EXAMINATION_UPLOADS, department, academicYear, fileName);
+
+export const deleteEntranceExaminationUpload = async (department, academicYear) => {
+  await deleteModuleUploadFile(KEYS.ENTRANCE_EXAMINATION_TICKETS, department, academicYear);
+  return deleteUploadReference(KEYS.ENTRANCE_EXAMINATION_UPLOADS, department, academicYear);
+};
+
+export const getRankStatementUpload = (department, academicYear) =>
+  getUploadReference(KEYS.RANK_STATEMENT_UPLOADS, department, academicYear);
+
+export const saveRankStatementUpload = (department, academicYear, fileName) =>
+  saveUploadReference(KEYS.RANK_STATEMENT_UPLOADS, department, academicYear, fileName);
+
+export const deleteRankStatementUpload = async (department, academicYear) => {
+  await deleteModuleUploadFile(KEYS.RANK_STATEMENTS, department, academicYear);
+  return deleteUploadReference(KEYS.RANK_STATEMENT_UPLOADS, department, academicYear);
+};
+
 // Students
 export const getStudents = () => getItem(KEYS.STUDENTS) || [];
 export const saveStudents = (list) => setItem(KEYS.STUDENTS, list);
@@ -61,6 +193,7 @@ export const deleteStudent = (id) => {
 
 export const findStudent = (id) => getStudents().find(s => s.id === id) || null;
 
+<<<<<<< HEAD
 export const recordDuplicateOverride = (override) => {
   if (getAuth()?.role !== 'Admin') {
     throw new Error('Only an administrator can record a duplicate override.');
@@ -73,19 +206,103 @@ export const recordDuplicateOverride = (override) => {
 };
 
 export const getProvisionalAllotments = () => getItem(KEYS.PROVISIONAL_ALLOTMENTS) || [];
+=======
+export const getProvisionalAllotments = () => {
+  const allotments = getItem(KEYS.PROVISIONAL_ALLOTMENTS);
+  return Array.isArray(allotments) ? allotments : [];
+};
+>>>>>>> 53f1899 (Added my changes)
 
-export const saveProvisionalAllotment = (allotment, role) => {
-  if (role !== 'Faculty') {
-    throw new Error('Only faculty can save provisional allotments.');
+const writeProvisionalAllotments = (allotments) => {
+  try {
+    localStorage.setItem(KEYS.PROVISIONAL_ALLOTMENTS, JSON.stringify(allotments));
+    return allotments;
+  } catch (error) {
+    console.error('Unable to save provisional allotments.', error);
+    throw new Error('Unable to save provisional allotments in this browser.');
+  }
+};
+
+const provisionalAllotmentKey = (allotment) =>
+  `${allotment.department}\u0000${allotment.academicYear}\u0000${allotment.identityKey}`;
+
+export const mergeProvisionalAllotments = (incoming) => {
+  const allotments = getProvisionalAllotments();
+  const byKey = new Map(
+    allotments
+      .filter(item => item.department && item.academicYear && item.identityKey)
+      .map(item => [provisionalAllotmentKey(item), item])
+  );
+  const merged = [...allotments];
+
+  incoming.forEach(item => {
+    const key = provisionalAllotmentKey(item);
+    const existing = byKey.get(key);
+    const record = {
+      ...existing,
+      ...item,
+      id: existing?.id || item.id,
+      createdAt: existing?.createdAt || item.createdAt,
+    };
+
+    if (existing) {
+      const index = merged.findIndex(entry => entry.id === existing.id);
+      merged[index] = record;
+    } else {
+      merged.push(record);
+    }
+    byKey.set(key, record);
+  });
+
+  return writeProvisionalAllotments(merged);
+};
+
+export const updateProvisionalAllotment = (updated) => {
+  const allotments = getProvisionalAllotments();
+  const index = allotments.findIndex(item => item.id === updated.id);
+  if (index < 0) throw new Error('This provisional allotment could not be found.');
+
+  const next = [...allotments];
+  next[index] = updated;
+  return writeProvisionalAllotments(next);
+};
+
+export const insertProvisionalAllotment = (allotment, position = { type: 'end' }) => {
+  const allotments = getProvisionalAllotments();
+  if (allotments.some(item => item.id === allotment.id)) {
+    throw new Error('This provisional allotment already exists.');
   }
 
-  const allotments = getProvisionalAllotments();
-  const updated = allotments.some(item => item.studentId === allotment.studentId)
-    ? allotments.map(item => item.studentId === allotment.studentId ? allotment : item)
-    : [...allotments, allotment];
+  let index;
+  if (position.type === 'before' || position.type === 'after') {
+    const targetIndex = allotments.findIndex(item =>
+      item.id === position.recordId
+      && item.department === allotment.department
+      && item.academicYear === allotment.academicYear
+    );
+    if (targetIndex < 0) throw new Error('The selected insertion position could not be found.');
+    index = targetIndex + (position.type === 'after' ? 1 : 0);
+  } else {
+    const lastInGroup = allotments.reduce((lastIndex, item, itemIndex) =>
+      item.department === allotment.department && item.academicYear === allotment.academicYear
+        ? itemIndex
+        : lastIndex, -1
+    );
+    index = lastInGroup < 0 ? allotments.length : lastInGroup + 1;
+  }
 
-  localStorage.setItem(KEYS.PROVISIONAL_ALLOTMENTS, JSON.stringify(updated));
-  return updated;
+  const next = [...allotments];
+  next.splice(index, 0, allotment);
+  return writeProvisionalAllotments(next);
+};
+
+export const deleteProvisionalAllotment = (id) => {
+  const allotments = getProvisionalAllotments();
+  const next = allotments.filter(item => item.id !== id);
+  if (next.length === allotments.length) {
+    throw new Error('This provisional allotment could not be found.');
+  }
+  return writeProvisionalAllotments(next);
 };
 
 export const getEntranceExaminationTickets = () =>
@@ -105,7 +322,147 @@ export const saveEntranceExaminationTicket = (ticket, role) => {
   return updated;
 };
 
+export const saveEntranceExaminationRecords = (records, role) => {
+  if (role !== 'Faculty' && role !== 'Admin') {
+    throw new Error('Only Faculty and Admission users can upload entrance examination records.');
+  }
+
+  const savedRecords = getEntranceExaminationTickets();
+  const recordKey = (record) =>
+    `${record.department}\u0000${record.academicYear}\u0000${record.identityKey}`;
+  const positions = new Map(
+    savedRecords
+      .filter(record => record.department && record.academicYear && record.identityKey)
+      .map((record, index) => [recordKey(record), index])
+  );
+  const updatedRecords = [...savedRecords];
+
+  records.forEach(record => {
+    const key = recordKey(record);
+    const index = positions.get(key);
+    if (index === undefined) {
+      positions.set(key, updatedRecords.length);
+      updatedRecords.push(record);
+    } else {
+      updatedRecords[index] = {
+        ...updatedRecords[index],
+        ...record,
+        id: updatedRecords[index].id || record.id,
+        createdAt: updatedRecords[index].createdAt || record.createdAt,
+      };
+    }
+  });
+
+  try {
+    localStorage.setItem(KEYS.ENTRANCE_EXAMINATION_TICKETS, JSON.stringify(updatedRecords));
+    return updatedRecords;
+  } catch (error) {
+    console.error('Unable to save entrance examination records.', error);
+    throw new Error('Unable to save entrance examination records in this browser.');
+  }
+};
+
+export const updateEntranceExaminationRecord = (record, role) => {
+  if (role !== 'Faculty' && role !== 'Admin') {
+    throw new Error('Only Faculty and Admission users can edit entrance examination records.');
+  }
+
+  const savedRecords = getEntranceExaminationTickets();
+  const index = savedRecords.findIndex(item => item.id === record.id);
+  if (index < 0) throw new Error('This entrance examination record could not be found.');
+
+  const updatedRecords = [...savedRecords];
+  updatedRecords[index] = record;
+  try {
+    localStorage.setItem(KEYS.ENTRANCE_EXAMINATION_TICKETS, JSON.stringify(updatedRecords));
+    return updatedRecords;
+  } catch (error) {
+    console.error('Unable to update entrance examination record.', error);
+    throw new Error('Unable to update entrance examination records in this browser.');
+  }
+};
+
 export const getRankStatements = () => getItem(KEYS.RANK_STATEMENTS) || [];
+
+const writeRankStatements = (statements) => {
+  try {
+    localStorage.setItem(KEYS.RANK_STATEMENTS, JSON.stringify(statements));
+    return statements;
+  } catch (error) {
+    console.error('Unable to save rank statement records.', error);
+    throw new Error('Unable to save rank statement records in this browser.');
+  }
+};
+
+const rankStatementRecordKey = (record) =>
+  `${record.department}\u0000${record.academicYear}\u0000${String(record.applicationNumber || '').trim().toLowerCase()}`;
+
+export const mergeRankStatementRecords = (incoming) => {
+  const statements = getRankStatements();
+  const positions = new Map(
+    statements
+      .filter(record => record.department && record.academicYear && record.applicationNumber)
+      .map((record, index) => [rankStatementRecordKey(record), index])
+  );
+  const updated = [...statements];
+
+  incoming.forEach(record => {
+    const key = rankStatementRecordKey(record);
+    const index = positions.get(key);
+    if (index === undefined) {
+      positions.set(key, updated.length);
+      updated.push(record);
+    } else {
+      updated[index] = {
+        ...updated[index],
+        ...record,
+        id: updated[index].id || record.id,
+        createdAt: updated[index].createdAt || record.createdAt,
+      };
+    }
+  });
+
+  return writeRankStatements(updated);
+};
+
+export const insertRankStatementRecord = (record, afterId = null) => {
+  const statements = getRankStatements();
+  if (statements.some(item => item.id === record.id)) {
+    throw new Error('This rank statement record already exists.');
+  }
+  const index = afterId
+    ? statements.findIndex(item =>
+      item.id === afterId
+      && item.department === record.department
+      && item.academicYear === record.academicYear
+    ) + 1
+    : statements.reduce((lastIndex, item, itemIndex) =>
+      item.department === record.department && item.academicYear === record.academicYear
+        ? itemIndex + 1
+        : lastIndex, -1
+    );
+  if (afterId && index === 0) throw new Error('The selected insertion position could not be found.');
+
+  const updated = [...statements];
+  updated.splice(index < 0 ? updated.length : index, 0, record);
+  return writeRankStatements(updated);
+};
+
+export const updateRankStatementRecord = (record) => {
+  const statements = getRankStatements();
+  const index = statements.findIndex(item => item.id === record.id);
+  if (index < 0) throw new Error('This rank statement record could not be found.');
+  const updated = [...statements];
+  updated[index] = record;
+  return writeRankStatements(updated);
+};
+
+export const deleteRankStatementRecord = (id) => {
+  const statements = getRankStatements();
+  const updated = statements.filter(item => item.id !== id);
+  if (updated.length === statements.length) throw new Error('This rank statement record could not be found.');
+  return writeRankStatements(updated);
+};
 
 export const saveRankStatement = (statement, role) => {
   if (role !== 'Faculty') {

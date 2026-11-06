@@ -1,314 +1,677 @@
-import { useState } from 'react';
-import { Printer, Save, Pencil, Upload, UserRound } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useMemo, useRef, useState } from 'react';
+import { AlertCircle, CheckCircle2, Pencil, Plus, Save, Trash2, Upload, X } from 'lucide-react';
+import { readSheet } from 'read-excel-file/browser';
+import { readFirstSheet } from 'xls-reader';
 import { useApp } from '../context/AppContext';
-import { getProvisionalAllotments, saveProvisionalAllotment } from '../utils/localStorage';
+import { BRANCH_CONFIG } from '../utils/demoData';
+import {
+  KEYS,
+  deleteProvisionalAllotment,
+  deleteProvisionalAllotmentUpload,
+  getProvisionalAllotmentUpload,
+  getProvisionalAllotments,
+  insertProvisionalAllotment,
+  mergeProvisionalAllotments,
+  saveModuleUploadFile,
+  saveProvisionalAllotmentUpload,
+  updateProvisionalAllotment,
+} from '../utils/localStorage';
 
-const INSTRUCTIONS = 'The candidate must report to the Principal/Dean of the above college within one week, with the original documents listed overleaf. Failure to report within the stipulated period will result in cancellation of the allotment, and no claim to the seat shall be entertained thereafter. Please read the instructions given overleaf carefully. The allotment is subject to verification of originals by the college authorities at the time of admission. Allotment of the branch rests with the college authorities at the time of admission.';
+const IDENTIFIER_HEADERS = [
+  'applicationno', 'applicationnumber', 'applicationid', 'appno',
+  'admissionno', 'admissionnumber', 'admissionid', 'admno',
+  'registerno', 'registernumber', 'studentid', 'rollno', 'rollnumber',
+  'hallticketno', 'hallticketnumber',
+];
+const NAME_HEADERS = ['name', 'studentname', 'nameofcandidate', 'nameofstudent', 'candidatename'];
+const DEFAULT_MANUAL_HEADERS = [
+  'Name',
+  'Application No.',
+  'Admission No.',
+  'Register Number',
+  'Course Allotted',
+];
 
-const today = () => {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+const normalizeHeader = (value) => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+const normalizeIdentifier = (value) => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+const cellToString = (value) => {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).trim();
 };
 
-const newAllotment = (student) => ({
-  studentId: student.id,
-  date: today(),
-  hallTicketNumber: student.registerNo || student.admissionNo || '',
-  courseAllotted: [student.programme, student.branch].filter(Boolean).join(' '),
-  community: student.community || student.category || '',
-  photo: '',
-});
+const createId = () => globalThis.crypto?.randomUUID?.()
+  || `allotment-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-const displayDate = (date) => {
-  if (!date) return '';
-  const parsed = new Date(`${date}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? date : parsed.toLocaleDateString('en-GB');
+const getAcademicYearOptions = (students, allotments) => {
+  const currentYear = new Date().getFullYear();
+  const startYear = new Date().getMonth() >= 6 ? currentYear : currentYear - 1;
+  const currentYears = Array.from({ length: 7 }, (_, index) => {
+    const year = startYear - index;
+    return `${year}-${String(year + 1).slice(-2)}`;
+  });
+  return [...new Set([
+    ...currentYears,
+    ...students.map(student => student.academicYear),
+    ...allotments.map(item => item.academicYear),
+  ].filter(Boolean))].sort((a, b) => b.localeCompare(a));
 };
+
+const makeUniqueHeaders = (headerCells, width) => {
+  const counts = new Map();
+  return Array.from({ length: width }, (_, index) => {
+    const base = cellToString(headerCells[index]) || `Column ${index + 1}`;
+    const count = (counts.get(base) || 0) + 1;
+    counts.set(base, count);
+    return count === 1 ? base : `${base} (${count})`;
+  });
+};
+
+const readSpreadsheet = async (file) => {
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  let rows;
+
+  if (extension === 'xls') {
+    const sheet = readFirstSheet(await file.arrayBuffer());
+    rows = sheet?.rows;
+  } else {
+    rows = await readSheet(file);
+  }
+
+  if (!rows?.length) throw new Error('The selected workbook does not contain a readable worksheet.');
+  const headerIndex = rows.findIndex(row => row.some(value => cellToString(value)));
+  if (headerIndex < 0) throw new Error('The selected worksheet is empty.');
+
+  const width = Math.max(...rows.slice(headerIndex).map(row => row.length));
+  const headers = makeUniqueHeaders(rows[headerIndex], width);
+  const dataRows = rows.slice(headerIndex + 1)
+    .map(row => Object.fromEntries(headers.map((header, index) => [header, cellToString(row[index])])))
+    .filter(row => Object.values(row).some(Boolean));
+
+  if (!dataRows.length) throw new Error('The worksheet has a header row but no allotment records.');
+  return { headers, dataRows };
+};
+
+const getRowValue = (rowData, aliases) => {
+  const header = Object.keys(rowData).find(key => aliases.includes(normalizeHeader(key)));
+  return header ? rowData[header] : '';
+};
+
+const getStudentIdentifier = (rowData) => getRowValue(rowData, IDENTIFIER_HEADERS);
+
+const getMatchingStudent = (rowData, students, department, academicYear) => {
+  const candidates = students.filter(student =>
+    student.branch === department && student.academicYear === academicYear
+  );
+  const identifier = normalizeIdentifier(getStudentIdentifier(rowData));
+
+  if (identifier) {
+    const matchingStudent = candidates.find(student =>
+      [student.applicationNo, student.admissionNo, student.registerNo]
+        .some(value => normalizeIdentifier(value) === identifier)
+    );
+    if (matchingStudent) return matchingStudent;
+  }
+
+  const name = normalizeIdentifier(getRowValue(rowData, NAME_HEADERS));
+  if (!name) return null;
+  const matchingStudents = candidates.filter(student => normalizeIdentifier(student.name) === name);
+  return matchingStudents.length === 1 ? matchingStudents[0] : null;
+};
+
+const makeIdentityKey = (rowData, student) => {
+  if (student) return `student:${student.id}`;
+  const identifier = normalizeIdentifier(getStudentIdentifier(rowData));
+  if (identifier) return `identifier:${identifier}`;
+  const normalizedRow = Object.entries(rowData)
+    .map(([header, value]) => [normalizeHeader(header), normalizeIdentifier(value)])
+    .sort(([headerA], [headerB]) => headerA.localeCompare(headerB));
+  return `row:${JSON.stringify(normalizedRow)}`;
+};
+
+const makeImportRecord = (rowData, headers, department, academicYear, fileName, students) => {
+  const student = getMatchingStudent(rowData, students, department, academicYear);
+  const now = new Date().toISOString();
+  return {
+    id: createId(),
+    department,
+    academicYear,
+    identityKey: makeIdentityKey(rowData, student),
+    studentId: student?.id || '',
+    studentName: student?.name || getRowValue(rowData, NAME_HEADERS),
+    studentIdentifier: student
+      ? student.applicationNo || student.admissionNo || student.registerNo || getStudentIdentifier(rowData)
+      : getStudentIdentifier(rowData),
+    headers,
+    rowData,
+    fileName,
+    createdAt: now,
+    updatedAt: now,
+  };
+};
+
+const recordKey = (record) =>
+  `${record.department}\u0000${record.academicYear}\u0000${record.identityKey}`;
 
 export default function ProvisionalAllotmentPage() {
-  const { user } = useAuth();
   const { students, showToast } = useApp();
-  const isFaculty = user?.role === 'Faculty';
+  const fileInputRef = useRef(null);
   const [allotments, setAllotments] = useState(() => getProvisionalAllotments());
-  const [selectedStudentId, setSelectedStudentId] = useState('');
-  const [candidateSearch, setCandidateSearch] = useState('');
-  const [form, setForm] = useState(null);
-  const [editing, setEditing] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [department, setDepartment] = useState('');
+  const [academicYear, setAcademicYear] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDeletingUploadedFile, setIsDeletingUploadedFile] = useState(false);
+  const [message, setMessage] = useState(null);
+  const [editingId, setEditingId] = useState('');
+  const [editedRow, setEditedRow] = useState(null);
+  const [showManualForm, setShowManualForm] = useState(false);
+  const [manualRow, setManualRow] = useState({});
+  const [manualAfterRecordId, setManualAfterRecordId] = useState('');
 
-  const availableStudents = students;
-  const matchingStudents = availableStudents.filter(student =>
-    `${student.name || ''} ${student.applicationNo || ''}`
-      .toLowerCase()
-      .includes(candidateSearch.trim().toLowerCase())
+  const departmentOptions = useMemo(() => [...new Set([
+    ...BRANCH_CONFIG.map(branch => branch.name),
+    ...students.map(student => student.branch),
+    ...allotments.map(item => item.department),
+  ].filter(Boolean))].sort(), [allotments, students]);
+  const academicYearOptions = useMemo(
+    () => getAcademicYearOptions(students, allotments),
+    [allotments, students]
   );
-  const activeStudentId = availableStudents.some(student => student.id === selectedStudentId)
-    ? selectedStudentId
-    : availableStudents[0]?.id || '';
-  const selectedStudent = students.find(student => student.id === activeStudentId);
-  const savedAllotment = allotments.find(item => item.studentId === activeStudentId);
-  const displayForm = form || (
-    selectedStudent
-      ? savedAllotment
-        ? { ...newAllotment(selectedStudent), ...savedAllotment }
-        : newAllotment(selectedStudent)
-      : null
-  );
-  const isEditing = isFaculty && (editing || !savedAllotment);
-
-  const selectStudent = (studentId) => {
-    setSelectedStudentId(studentId);
-    setForm(null);
-    setEditing(false);
-  };
-
-  const handleStudentChange = (event) => selectStudent(event.target.value);
-
-  const updateForm = (field, value) => {
-    setForm(current => ({ ...(current || displayForm), [field]: value }));
-  };
-
-  const handlePhotoChange = (event) => {
-    if (!isFaculty || !isEditing) return;
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      showToast('Choose an image file for the candidate photo.', 'error');
+  const displayedAllotments = useMemo(() => allotments.filter(item =>
+    item.department === department
+    && item.academicYear === academicYear
+    && item.rowData
+    && !item.fileData
+  ), [academicYear, allotments, department]);
+  const savedUploadReference = department && academicYear
+    ? uploadedFiles.find(item => item.department === department && item.academicYear === academicYear)
+      || getProvisionalAllotmentUpload(department, academicYear)
+    : null;
+  const uploadedFileName = savedUploadReference
+    ? savedUploadReference.fileName || ''
+    : displayedAllotments.find(item => item.fileName)?.fileName || '';
+  const displayedHeaders = useMemo(() => [...new Set(
+    [...DEFAULT_MANUAL_HEADERS, ...displayedAllotments.flatMap(item => item.headers || Object.keys(item.rowData || {}))]
+  )], [displayedAllotments]);
+  const handleFileChange = (event) => {
+    const file = event.target.files?.[0] || null;
+    setMessage(null);
+    if (file && !/\.(xlsx|xls)$/i.test(file.name)) {
+      setSelectedFile(null);
       event.target.value = '';
+      setMessage({ type: 'error', text: 'Choose a student spreadsheet in .xlsx or .xls format.' });
       return;
     }
-    if (file.size > 1024 * 1024) {
-      showToast('The candidate photo must be smaller than 1 MB.', 'error');
-      event.target.value = '';
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => updateForm('photo', String(reader.result));
-    reader.onerror = () => showToast('Unable to read the candidate photo.', 'error');
-    reader.readAsDataURL(file);
+    setSelectedFile(file);
   };
 
-  const handleSave = () => {
-    if (!isFaculty) {
-      showToast('Only faculty can save provisional allotments.', 'error');
+  const handleUpload = async () => {
+    if (!department || !academicYear || !selectedFile) {
+      setMessage({ type: 'error', text: 'Select a department, academic year, and file before uploading.' });
       return;
     }
-    if (!selectedStudent || !displayForm?.hallTicketNumber.trim() || !displayForm?.courseAllotted.trim()) {
-      showToast('Select a candidate and enter the hall ticket number and allotted course.', 'error');
+
+    setIsUploading(true);
+    setMessage(null);
+    try {
+      const { headers, dataRows } = await readSpreadsheet(selectedFile);
+      const incoming = dataRows.map(row =>
+        makeImportRecord(row, headers, department, academicYear, selectedFile.name, students)
+      );
+      const existingKeys = new Set(
+        getProvisionalAllotments()
+          .filter(item => item.department === department && item.academicYear === academicYear)
+          .map(recordKey)
+      );
+      const uniqueIncoming = [...new Map(incoming.map(record => [recordKey(record), record])).values()];
+      const updatedCount = uniqueIncoming.filter(record => existingKeys.has(recordKey(record))).length;
+      await saveModuleUploadFile(KEYS.PROVISIONAL_ALLOTMENTS, department, academicYear, selectedFile);
+      const saved = mergeProvisionalAllotments(uniqueIncoming);
+      const savedFiles = saveProvisionalAllotmentUpload(department, academicYear, selectedFile.name);
+      setAllotments(saved);
+      setUploadedFiles(savedFiles);
+      setEditingId('');
+      setEditedRow(null);
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setMessage({
+        type: 'success',
+        text: `Uploaded ${uniqueIncoming.length} student record${uniqueIncoming.length === 1 ? '' : 's'}: ${uniqueIncoming.length - updatedCount} new, ${updatedCount} updated.`,
+      });
+      showToast('Provisional allotment spreadsheet uploaded successfully.', 'success');
+    } catch (error) {
+      console.error('Unable to upload provisional allotment spreadsheet.', error);
+      const text = error instanceof Error
+        ? `Upload failed: ${error.message}`
+        : 'Upload failed while reading or saving the Excel workbook.';
+      setMessage({ type: 'error', text });
+      showToast(text, 'error');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleDeleteUploadedFile = async () => {
+    if (!window.confirm('Delete the uploaded file? Existing student records will remain unchanged.')) return;
+    setIsDeletingUploadedFile(true);
+    try {
+      const savedFiles = await deleteProvisionalAllotmentUpload(department, academicYear);
+      setUploadedFiles(savedFiles);
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setMessage({ type: 'success', text: 'Uploaded file removed. Existing student records were kept.' });
+      showToast('Uploaded file removed. Existing student records were kept.', 'success');
+    } catch (error) {
+      console.error('Unable to delete provisional allotment file.', error);
+      const text = error instanceof Error ? error.message : 'Unable to delete the uploaded file.';
+      setMessage({ type: 'error', text });
+      showToast(text, 'error');
+    } finally {
+      setIsDeletingUploadedFile(false);
+    }
+  };
+
+  const startEditing = (record) => {
+    setEditingId(record.id);
+    setEditedRow({ ...record.rowData });
+    setMessage(null);
+  };
+
+  const saveEditedRecord = (record) => {
+    if (!editedRow) return;
+    try {
+      const linkedStudent = students.find(student => student.id === record.studentId);
+      const saved = updateProvisionalAllotment({
+        ...record,
+        rowData: editedRow,
+        identityKey: makeIdentityKey(editedRow, linkedStudent),
+        studentName: getRowValue(editedRow, NAME_HEADERS) || record.studentName,
+        studentIdentifier: getStudentIdentifier(editedRow) || record.studentIdentifier,
+        updatedAt: new Date().toISOString(),
+      });
+      setAllotments(saved);
+      setEditingId('');
+      setEditedRow(null);
+      setMessage({ type: 'success', text: 'Provisional allotment record updated.' });
+      showToast('Provisional allotment record updated.', 'success');
+    } catch (error) {
+      console.error('Unable to update provisional allotment record.', error);
+      const text = error instanceof Error ? error.message : 'Unable to update the provisional allotment record.';
+      setMessage({ type: 'error', text });
+      showToast(text, 'error');
+    }
+  };
+
+  const saveManualStudent = (event) => {
+    event.preventDefault();
+    if (!manualRow.name.trim() || !manualRow.applicationNumber.trim()) {
+      setMessage({ type: 'error', text: 'Enter the student name before saving.' });
       return;
     }
 
     try {
-      const saved = saveProvisionalAllotment({
-        ...displayForm,
-        studentId: selectedStudent.id,
-        updatedAt: new Date().toISOString(),
-      }, user.role);
+      const rowData = Object.fromEntries(displayedHeaders.map(header => [header, '']));
+      rowData.Name = manualRow.name.trim();
+      rowData['Application No.'] = manualRow.applicationNumber.trim();
+      const record = makeImportRecord(
+        rowData,
+        displayedHeaders,
+        manualRow.department,
+        manualRow.academicYear,
+        'Manually added',
+        students
+      );
+      const saved = insertProvisionalAllotment(record, {
+        type: 'after',
+        recordId: manualAfterRecordId,
+      });
       setAllotments(saved);
-      setForm(saved.find(item => item.studentId === selectedStudent.id));
-      setEditing(false);
-      showToast('Provisional allotment saved.', 'success');
+      setManualRow({});
+      setShowManualForm(false);
+      setManualAfterRecordId('');
+      setMessage({ type: 'success', text: 'Student provisional allotment details saved.' });
+      showToast('Student provisional allotment details saved.', 'success');
     } catch (error) {
-      console.error('Unable to save provisional allotment.', error);
-      showToast(error.message || 'Unable to save the provisional allotment.', 'error');
+      console.error('Unable to save manual provisional allotment.', error);
+      const text = error instanceof Error ? error.message : 'Unable to save student details.';
+      setMessage({ type: 'error', text });
+      showToast(text, 'error');
     }
   };
 
-  const handlePrint = () => window.print();
+  const handleDeleteStudent = (record) => {
+    const name = getRowValue(record.rowData, NAME_HEADERS) || record.studentName || 'this student';
+    if (!window.confirm(`Delete ${name} from the provisional allotment records?`)) return;
+
+    try {
+      const saved = deleteProvisionalAllotment(record.id);
+      setAllotments(saved);
+      if (editingId === record.id) {
+        setEditingId('');
+        setEditedRow(null);
+      }
+      setMessage({ type: 'success', text: `${name} was deleted.` });
+      showToast(`${name} was deleted.`, 'success');
+    } catch (error) {
+      console.error('Unable to delete provisional allotment record.', error);
+      const text = error instanceof Error ? error.message : 'Unable to delete the selected student.';
+      setMessage({ type: 'error', text });
+      showToast(text, 'error');
+    }
+  };
 
   return (
-    <div className="provisional-page animate-fade-in space-y-5">
-      <style>{`
-        @media print {
-          @page { size: landscape; margin: 10mm; }
-          body * { visibility: hidden !important; }
-          .provisional-document, .provisional-document * { visibility: visible !important; }
-          .provisional-document {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            min-height: 0 !important;
-            margin: 0 !important;
-            print-color-adjust: exact !important;
-            -webkit-print-color-adjust: exact !important;
-          }
-          .provisional-document-inner { min-height: 0 !important; }
-        }
-      `}</style>
-
-      <div className="no-print flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-800">Provisional Allotment</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {isFaculty ? 'Create, edit, view, and print B.E./B.Tech. allotment orders.' : 'View and print saved B.E./B.Tech. allotment orders.'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {isFaculty && selectedStudent && savedAllotment && !editing && (
-            <button type="button" onClick={() => setEditing(true)} className="btn-secondary btn-sm">
-              <Pencil size={14} /> Edit
-            </button>
-          )}
-          {isEditing && (
-            <button type="button" onClick={handleSave} className="btn-primary btn-sm">
-              <Save size={14} /> Save Allotment
-            </button>
-          )}
-          {selectedStudent && (
-            <button type="button" onClick={handlePrint} className="btn-secondary btn-sm">
-              <Printer size={14} /> Print
-            </button>
-          )}
-        </div>
+    <div className="animate-fade-in space-y-5">
+      <div>
+        <h1 className="text-xl font-bold text-slate-800">Provisional Allotment</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Upload and manage provisional allotment records by department and academic year.
+        </p>
       </div>
 
-      <div className="no-print card p-4">
-        {isFaculty && (
-          <div className="mb-4">
-            <label htmlFor="allotment-candidate-search" className="label">Candidate Search</label>
-            <input
-              id="allotment-candidate-search"
-              type="search"
-              className="input-field max-w-xl"
-              placeholder="Search by name or Application Number"
-              value={candidateSearch}
-              onChange={event => setCandidateSearch(event.target.value)}
-            />
-            {candidateSearch.trim() && (
-              matchingStudents.length ? (
-                <div className="mt-2 flex max-h-48 max-w-xl flex-col gap-1 overflow-y-auto">
-                  {matchingStudents.map(student => (
-                    <button
-                      key={student.id}
-                      type="button"
-                      onClick={() => selectStudent(student.id)}
-                      className="input-field text-left"
-                    >
-                      {student.name} — {student.applicationNo || student.admissionNo || student.id}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-2 text-sm text-slate-500">No candidates found.</p>
-              )
-            )}
+      <section className="card space-y-5 p-5">
+        <h2 className="section-title">1. Select Department &amp; Academic Year</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="allotment-department" className="label">Select Department</label>
+            <select
+              id="allotment-department"
+              className="input-field"
+              value={department}
+              onChange={event => {
+                setDepartment(event.target.value);
+                setMessage(null);
+              }}
+            >
+              <option value="">Choose a department</option>
+              {departmentOptions.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="allotment-year" className="label">Select Academic Year</label>
+            <select
+              id="allotment-year"
+              className="input-field"
+              value={academicYear}
+              onChange={event => {
+                setAcademicYear(event.target.value);
+                setMessage(null);
+              }}
+            >
+              <option value="">Choose an academic year</option>
+              {academicYearOptions.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </div>
+        </div>
+
+      </section>
+
+      <section className="card space-y-5 p-5">
+        <div>
+          <h2 className="section-title">2. Upload Student Spreadsheet</h2>
+          <p className="mt-1 text-xs text-slate-500">Upload a student spreadsheet or add student details manually.</p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+            className="sr-only"
+            onChange={handleFileChange}
+          />
+          <span className="min-w-0 flex-1 truncate text-sm text-slate-500" aria-live="polite">
+            {selectedFile
+              ? uploadedFileName ? `Selected: ${selectedFile.name} (replacing ${uploadedFileName})` : selectedFile.name
+              : uploadedFileName || 'No file selected'}
+          </span>
+          {uploadedFileName && (
+            <button
+              type="button"
+              className="btn-secondary btn-sm text-red-600"
+              onClick={handleDeleteUploadedFile}
+              disabled={isUploading || isDeletingUploadedFile}
+              aria-label="Delete uploaded file"
+              title="Delete uploaded file"
+            >
+              <Trash2 size={14} aria-hidden="true" />
+              Delete File
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn-primary btn-sm"
+            onClick={() => selectedFile ? handleUpload() : fileInputRef.current?.click()}
+            disabled={isUploading || !department || !academicYear}
+          >
+            <Upload size={14} />
+            {isUploading ? 'Uploading...' : 'Upload'}
+          </button>
+        </div>
+        <p className="text-xs text-slate-400">Supported spreadsheet formats: .xlsx and .xls.</p>
+
+        {message && (
+          <div
+            role={message.type === 'error' ? 'alert' : 'status'}
+            className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${
+              message.type === 'error'
+                ? 'border-red-200 bg-red-50 text-red-700'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+            }`}
+          >
+            {message.type === 'error' ? <AlertCircle size={17} className="mt-0.5 shrink-0" /> : <CheckCircle2 size={17} className="mt-0.5 shrink-0" />}
+            <span>{message.text}</span>
           </div>
         )}
-        {!isFaculty && <label htmlFor="allotment-student" className="label">Candidate</label>}
-        {!isFaculty && availableStudents.length ? (
-          <select
-            id="allotment-student"
-            className="input-field max-w-xl"
-            value={activeStudentId}
-            onChange={handleStudentChange}
-          >
-            {availableStudents.map(student => (
-              <option key={student.id} value={student.id}>
-                {student.name} — {student.applicationNo || student.admissionNo || student.id}
-              </option>
-            ))}
-          </select>
-        ) : !isFaculty && (
-          <p className="text-sm text-slate-500">
-            No student records are available.
-          </p>
-        )}
-        {isFaculty && !availableStudents.length && (
-          <p className="text-sm text-slate-500">No candidate records are available.</p>
-        )}
-      </div>
 
-      {selectedStudent && displayForm && (isFaculty || savedAllotment) ? (
-        <div className={`grid items-start gap-5 ${isEditing ? 'xl:grid-cols-[minmax(280px,380px)_minmax(0,1fr)]' : 'grid-cols-1'}`}>
-          {isEditing && (
-            <section className="no-print card space-y-4 p-5">
-              <h2 className="section-title">Allotment Details</h2>
-              <div>
-                <label htmlFor="allotment-date" className="label">Date</label>
-                <input id="allotment-date" type="date" className="input-field" value={displayForm.date || ''} onChange={event => updateForm('date', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="allotment-hall-ticket" className="label">Hall Ticket Number</label>
-                <input id="allotment-hall-ticket" className="input-field" value={displayForm.hallTicketNumber || ''} onChange={event => updateForm('hallTicketNumber', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="allotment-course" className="label">Course Allotted</label>
-                <input id="allotment-course" className="input-field" value={displayForm.courseAllotted || ''} onChange={event => updateForm('courseAllotted', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="allotment-community" className="label">Community</label>
-                <input id="allotment-community" className="input-field" value={displayForm.community || ''} onChange={event => updateForm('community', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="allotment-photo" className="label">Candidate Photo</label>
-                <input id="allotment-photo" type="file" accept="image/*" className="input-field" onChange={handlePhotoChange} />
-                <p className="mt-1 text-xs text-slate-400">Image files up to 1 MB.</p>
-              </div>
-            </section>
+        <div className="overflow-hidden rounded-xl border border-slate-200">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-4">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">Student Records</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              {department && academicYear ? `${department} · ${academicYear}` : 'Select a department and year to view records'}
+            </p>
+          </div>
+          {department && academicYear && (
+            <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
+              {displayedAllotments.length} record{displayedAllotments.length === 1 ? '' : 's'}
+            </span>
           )}
+        </div>
 
-          <article className="provisional-document min-w-0 w-full rounded-2xl border-[7px] border-[#14528a] bg-[#d0eafb] p-2 text-[#17456c] shadow-sm">
-            <div className="provisional-document-inner overflow-hidden rounded-xl border border-[#8cb7d4]">
-              <header className="flex items-center gap-4 bg-[#f7f4df] px-5 py-4">
-                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full border-[3px] border-[#1b547d] text-center text-xs font-black leading-tight text-[#1b547d]">
-                  KVELL
-                </div>
-                <div className="min-w-0 flex-1 text-center">
-                  <h2 className="text-base font-extrabold leading-tight sm:text-lg">
-                    Karpaga Vinayaga Educational Lore for Learning (Deemed to be University)
-                  </h2>
-                  <p className="mt-1 text-xs leading-relaxed">
-                    GST Road, Chinnakolambakkam, Padalam – 603 308, Madurantakam (Tk), Chengalpattu District
-                    <br />044 - 7156 6373 or email us at kvelladmission2026@gmail.com
-                  </p>
-                </div>
-              </header>
+        {!department || !academicYear ? (
+          <p className="px-5 py-8 text-center text-sm text-slate-500">
+            Choose a department and academic year to see student allotment details.
+          </p>
+        ) : displayedAllotments.length === 0 ? (
+          <p className="px-5 py-8 text-center text-sm text-slate-500">
+            No student records have been added for this selection.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-max text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th scope="col" className="px-4 py-3">S.No.</th>
+                  <th scope="col" className="px-4 py-3">Student Record</th>
+                  {displayedHeaders.map(header => <th scope="col" key={header} className="px-4 py-3">{header}</th>)}
+                  <th scope="col" className="px-4 py-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {displayedAllotments.map((record, index) => {
+                  const isEditing = editingId === record.id;
+                  const linkedStudent = students.find(student => student.id === record.studentId);
+                  return (
+                    <tr key={record.id} className="align-top text-slate-700">
+                      <td className="px-4 py-3 font-medium">{index + 1}</td>
+                      <td className="max-w-56 px-4 py-3">
+                        <p className="font-medium">{getRowValue(record.rowData, NAME_HEADERS) || linkedStudent?.name || record.studentName || 'Not linked to a student'}</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {getStudentIdentifier(record.rowData)
+                            || linkedStudent?.applicationNo
+                            || linkedStudent?.admissionNo
+                            || linkedStudent?.registerNo
+                            || record.studentIdentifier
+                            || 'No matching identifier'}
+                        </p>
+                      </td>
+                      {displayedHeaders.map(header => (
+                        <td key={header} className="max-w-64 px-4 py-3">
+                          {isEditing ? (
+                            <input
+                              aria-label={`${header} for ${record.studentName || record.studentIdentifier || 'record'}`}
+                              className="input-field min-w-40 py-1.5 text-xs"
+                              value={editedRow?.[header] || ''}
+                              onChange={event => setEditedRow(current => ({ ...current, [header]: event.target.value }))}
+                            />
+                          ) : (
+                            record.rowData?.[header] || '—'
+                          )}
+                        </td>
+                      ))}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          {isEditing ? (
+                            <>
+                              <button type="button" className="btn-primary btn-sm" onClick={() => saveEditedRecord(record)} aria-label="Save changes">
+                                <Save size={13} /> Save
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-secondary btn-sm"
+                                onClick={() => {
+                                  setEditingId('');
+                                  setEditedRow(null);
+                                }}
+                                aria-label="Cancel editing"
+                              >
+                                <X size={13} />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button type="button" className="btn-secondary btn-sm" onClick={() => startEditing(record)}>
+                                <Pencil size={13} /> Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-secondary btn-sm text-red-600 hover:bg-red-50"
+                                onClick={() => handleDeleteStudent(record)}
+                                aria-label={`Delete ${getRowValue(record.rowData, NAME_HEADERS) || record.studentName || 'student'}`}
+                              >
+                                <Trash2 size={13} /> Delete
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-secondary btn-sm"
+                                onClick={() => {
+                                  setManualAfterRecordId(record.id);
+                                  setManualRow({
+                                    name: '',
+                                    applicationNumber: '',
+                                    academicYear,
+                                    department,
+                                  });
+                                  setShowManualForm(true);
+                                  setMessage(null);
+                                }}
+                              >
+                                <Plus size={13} /> Add Student
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        <p className="mt-1 max-w-48 truncate text-[10px] text-slate-400" title={record.fileName}>
+                          {record.fileName}
+                        </p>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        </div>
 
-              <div className="flex flex-wrap items-start justify-between gap-3 bg-[#fffde9] px-5 py-3">
-                <div>
-                  <h3 className="text-base font-extrabold sm:text-lg">Provisional Allotment Order for B.E. / B.TECH.</h3>
-                  <p className="text-xs">The candidate is hereby informed of the provisional allotment of a seat in the first year of B.E./B.TECH. as details below</p>
-                </div>
-                <p className="shrink-0 text-sm font-semibold">Date: {displayDate(displayForm.date) || '____________'}</p>
+        {showManualForm && (
+          <form onSubmit={saveManualStudent} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-slate-800">Add Student Details</h3>
+              <p className="text-xs text-slate-500">
+                Insert below {getRowValue(
+                  displayedAllotments.find(record => record.id === manualAfterRecordId)?.rowData || {},
+                  NAME_HEADERS
+                ) || 'selected student'}
+              </p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div>
+                <label htmlFor="manual-serial-number" className="label">Serial Number</label>
+                <input
+                  id="manual-serial-number"
+                  className="input-field"
+                  value={Math.max(0, displayedAllotments.findIndex(record => record.id === manualAfterRecordId) + 2)}
+                  readOnly
+                />
               </div>
-
-              <div className="grid grid-cols-[minmax(0,1fr)_140px] gap-4 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_175px] sm:gap-6">
-                <dl className="space-y-2 text-sm sm:text-base">
-                  <div><dt className="inline font-bold">Hall Ticket Number: </dt><dd className="inline">{displayForm.hallTicketNumber || '________________'}</dd></div>
-                  <div><dt className="inline font-bold">Name of the Candidate: </dt><dd className="inline">{selectedStudent.name}</dd></div>
-                  <div><dt className="inline font-bold">Course Allotted: </dt><dd className="inline">{displayForm.courseAllotted || '________________'}</dd></div>
-                  <div><dt className="inline font-bold">Community: </dt><dd className="inline">{displayForm.community || '________________'}</dd></div>
-                </dl>
-                <div className="flex flex-col items-center gap-1">
-                  {displayForm.photo ? (
-                    <img src={displayForm.photo} alt={`Candidate ${selectedStudent.name}`} className="h-28 w-24 border border-slate-700 bg-white object-cover sm:h-32 sm:w-28" />
-                  ) : (
-                    <div className="flex h-28 w-24 flex-col items-center justify-center border border-slate-700 bg-white text-center text-xs font-bold sm:h-32 sm:w-28">
-                      <UserRound size={25} className="mb-1" /> PHOTO
-                    </div>
-                  )}
-                  {isEditing && (
-                    <label htmlFor="allotment-photo" className="no-print mt-1 flex cursor-pointer items-center gap-1 text-xs font-semibold">
-                      <Upload size={13} /> {displayForm.photo ? 'Change photo above' : 'Upload photo above'}
-                    </label>
-                  )}
-                </div>
-                <p className="col-span-2 text-[10px] leading-relaxed sm:text-xs">{INSTRUCTIONS}</p>
-                <div className="col-start-2 text-center">
-                  <div className="mb-1 h-8 rounded-md border border-[#17456c] bg-white/70" />
-                  <p className="text-xs font-bold">Nodal Officer-KVELL</p>
-                </div>
+              <div>
+                <label htmlFor="manual-student-name" className="label">Student Name</label>
+                <input
+                  id="manual-student-name"
+                  className="input-field"
+                  value={manualRow.name || ''}
+                  required
+                  onChange={event => setManualRow(current => ({ ...current, name: event.target.value }))}
+                />
+              </div>
+              <div>
+                <label htmlFor="manual-application-number" className="label">Application Number</label>
+                <input
+                  id="manual-application-number"
+                  className="input-field"
+                  value={manualRow.applicationNumber || ''}
+                  required
+                  onChange={event => setManualRow(current => ({ ...current, applicationNumber: event.target.value }))}
+                />
+              </div>
+              <div>
+                <label htmlFor="manual-academic-year" className="label">Academic Year</label>
+                <input
+                  id="manual-academic-year"
+                  className="input-field"
+                  value={manualRow.academicYear || ''}
+                  readOnly
+                />
+              </div>
+              <div>
+                <label htmlFor="manual-department" className="label">Department</label>
+                <select id="manual-department" className="input-field" value={manualRow.department || ''} disabled>
+                  <option value={manualRow.department || ''}>{manualRow.department || department}</option>
+                </select>
               </div>
             </div>
-          </article>
-        </div>
-      ) : selectedStudent && !isFaculty ? (
-        <p className="card p-5 text-sm text-slate-500">
-          No provisional allotment order has been saved for this student.
-        </p>
-      ) : null}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn-secondary btn-sm"
+                onClick={() => {
+                  setShowManualForm(false);
+                  setManualAfterRecordId('');
+                }}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="btn-primary btn-sm">
+                <Save size={14} /> Save Student
+              </button>
+            </div>
+          </form>
+        )}
+      </section>
     </div>
   );
 }

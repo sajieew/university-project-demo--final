@@ -1,427 +1,422 @@
-import { useState } from 'react';
-import { Pencil, Printer, Save } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useMemo, useRef, useState } from 'react';
+import { AlertCircle, CheckCircle2, Pencil, Plus, Save, Trash2, Upload, X } from 'lucide-react';
+import { readSheet } from 'read-excel-file/browser';
+import { readFirstSheet } from 'xls-reader';
 import { useApp } from '../context/AppContext';
-import { getRankStatements, saveRankStatement } from '../utils/localStorage';
+import { BRANCH_CONFIG } from '../utils/demoData';
+import {
+  KEYS,
+  deleteRankStatementRecord,
+  deleteRankStatementUpload,
+  getRankStatementUpload,
+  getRankStatements,
+  insertRankStatementRecord,
+  mergeRankStatementRecords,
+  saveModuleUploadFile,
+  saveRankStatementUpload,
+  updateRankStatementRecord,
+} from '../utils/localStorage';
 
-const newRankStatement = (student) => ({
-  studentId: student.id,
-  applicationNumber: student.applicationNo || student.admissionNo || '',
-  name: student.name || '',
-  courseAllotted: [student.programme, student.branch].filter(Boolean).join(' '),
-  randomNumber: '',
-  maximumMarks: '',
-  marksObtained: '',
-  photo: student.photo || student.photoUrl || '',
-  marksObtainedInWords: '',
-  cutOffMarks: '',
-  overallRank: '',
-  nodalOfficer: 'Nodal Officer-KVELL',
-});
-
-const requiredFields = [
-  'applicationNumber',
-  'name',
-  'courseAllotted',
-  'randomNumber',
-  'maximumMarks',
-  'marksObtained',
-  'marksObtainedInWords',
-  'cutOffMarks',
-  'overallRank',
-  'photo',
+const RANK_COLUMNS = [
+  { key: 'applicationNumber', label: 'Application Number', aliases: ['applicationnumber', 'applicationno', 'applicationid', 'appno', 'application'] },
+  { key: 'name', label: 'Name of Candidate', aliases: ['nameofcandidate', 'candidatename', 'studentname', 'name'] },
+  { key: 'courseAllotted', label: 'Course Allotted', aliases: ['courseallotted', 'allottedcourse', 'course'] },
+  { key: 'randomNumber', label: 'Random Number', aliases: ['randomnumber', 'randomno', 'random'] },
+  { key: 'maximumMarks', label: 'Maximum Marks', aliases: ['maximummarks', 'maxmarks', 'maximum'] },
+  { key: 'marksObtained', label: 'Marks Obtained', aliases: ['marksobtained', 'markssecured', 'obtainedmarks'] },
+  { key: 'marksObtainedInWords', label: 'Marks Obtained in Words', aliases: ['marksobtainedinwords', 'marksinwords'] },
+  { key: 'cutOffMarks', label: 'Cutoff Marks', aliases: ['cutoffmarks', 'cutoff', 'cutoffmark'] },
+  { key: 'overallRank', label: 'Overall Rank', aliases: ['overallrank', 'rank', 'ranknumber'] },
 ];
 
+const emptyRankRecord = () => Object.fromEntries(RANK_COLUMNS.map(column => [column.key, '']));
+const normalizeHeader = value => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+const createId = () => globalThis.crypto?.randomUUID?.()
+  || `rank-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+const cellToString = value => {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).trim();
+};
+
+const readSpreadsheet = async file => {
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  let rows;
+  if (extension === 'xls') {
+    const sheet = readFirstSheet(await file.arrayBuffer());
+    rows = sheet?.rows;
+  } else {
+    rows = await readSheet(file);
+  }
+
+  if (!rows?.length) throw new Error('The selected workbook does not contain a readable worksheet.');
+  const headerIndex = rows.findIndex(row => row.some(value => cellToString(value)));
+  if (headerIndex < 0) throw new Error('The selected worksheet is empty.');
+  const headers = rows[headerIndex].map(normalizeHeader);
+  const columnIndexes = new Map(RANK_COLUMNS.map(column => [
+    column.key,
+    headers.findIndex(header => column.aliases.includes(header)),
+  ]));
+  const missing = RANK_COLUMNS.filter(column => columnIndexes.get(column.key) < 0);
+  if (missing.length) {
+    throw new Error(`Missing required spreadsheet columns: ${missing.map(column => column.label).join(', ')}.`);
+  }
+
+  const records = rows.slice(headerIndex + 1).map((row, rowIndex) => {
+    const record = Object.fromEntries(RANK_COLUMNS.map(column => [
+      column.key,
+      cellToString(row[columnIndexes.get(column.key)]),
+    ]));
+    if (Object.values(record).every(value => !value)) return null;
+    const missingValues = RANK_COLUMNS.filter(column => !record[column.key]);
+    if (missingValues.length) {
+      throw new Error(`Spreadsheet row ${headerIndex + rowIndex + 2} is missing: ${missingValues.map(column => column.label).join(', ')}.`);
+    }
+    return record;
+  }).filter(Boolean);
+
+  if (!records.length) throw new Error('The worksheet has a header row but no rank statement records.');
+  return records;
+};
+
+const getAcademicYearOptions = (students, records) => {
+  const currentYear = new Date().getFullYear();
+  const startYear = new Date().getMonth() >= 6 ? currentYear : currentYear - 1;
+  const recentYears = Array.from({ length: 7 }, (_, index) => {
+    const year = startYear - index;
+    return `${year}-${String(year + 1).slice(-2)}`;
+  });
+  return [...new Set([
+    ...recentYears,
+    ...students.map(student => student.academicYear),
+    ...records.map(record => record.academicYear),
+  ].filter(Boolean))].sort((a, b) => b.localeCompare(a));
+};
+
 export default function RankStatementPage() {
-  const { user } = useAuth();
   const { students, showToast } = useApp();
-  const isFaculty = user?.role === 'Faculty';
-  const [statements, setStatements] = useState(() => getRankStatements());
-  const [selectedStudentId, setSelectedStudentId] = useState('');
-  const [candidateSearch, setCandidateSearch] = useState('');
+  const fileInputRef = useRef(null);
+  const [records, setRecords] = useState(() => getRankStatements());
+  const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [department, setDepartment] = useState('');
+  const [academicYear, setAcademicYear] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDeletingFile, setIsDeletingFile] = useState(false);
+  const [message, setMessage] = useState(null);
+  const [editingId, setEditingId] = useState('');
   const [form, setForm] = useState(null);
-  const [editing, setEditing] = useState(false);
+  const [insertAfterId, setInsertAfterId] = useState(null);
 
-  const availableStudents = students;
-  const matchingStudents = availableStudents.filter(student =>
-    `${student.name || ''} ${student.applicationNo || ''}`
-      .toLowerCase()
-      .includes(candidateSearch.trim().toLowerCase())
+  const departmentOptions = useMemo(() => [...new Set([
+    ...BRANCH_CONFIG.map(branch => branch.name),
+    ...students.map(student => student.branch),
+    ...records.map(record => record.department),
+  ].filter(Boolean))].sort(), [records, students]);
+  const academicYearOptions = useMemo(
+    () => getAcademicYearOptions(students, records),
+    [records, students]
   );
+  const displayedRecords = useMemo(() => records.filter(record =>
+    record.department === department && record.academicYear === academicYear
+  ), [academicYear, department, records]);
+  const savedUploadReference = department && academicYear
+    ? uploadedFiles.find(item => item.department === department && item.academicYear === academicYear)
+      || getRankStatementUpload(department, academicYear)
+    : null;
+  const uploadedFileName = savedUploadReference?.fileName || '';
 
-  const activeStudentId = availableStudents.some(student => student.id === selectedStudentId)
-    ? selectedStudentId
-    : availableStudents[0]?.id || '';
-  const selectedStudent = students.find(student => student.id === activeStudentId);
-  const savedStatement = statements.find(item => item.studentId === activeStudentId);
-  const displayForm = form || (
-    selectedStudent
-      ? savedStatement
-        ? { ...newRankStatement(selectedStudent), ...savedStatement }
-        : newRankStatement(selectedStudent)
-      : null
-  );
-  const isEditing = isFaculty && (editing || !savedStatement);
-
-  const selectStudent = (studentId) => {
-    const student = students.find(item => item.id === studentId);
-    const statement = statements.find(item => item.studentId === studentId);
-    setSelectedStudentId(studentId);
-    setForm(student ? statement ? { ...newRankStatement(student), ...statement } : newRankStatement(student) : null);
-    setEditing(isFaculty && !statement);
+  const handleFileChange = event => {
+    const file = event.target.files?.[0] || null;
+    setSelectedFile(file);
+    setMessage(null);
   };
 
-  const handleStudentChange = (event) => selectStudent(event.target.value);
-
-  const updateForm = (field, value) => {
-    setForm(current => ({ ...(current || displayForm), [field]: value }));
+  const handleUpload = async () => {
+    if (!department || !academicYear || !selectedFile) {
+      setMessage({ type: 'error', text: 'Select a department, academic year, and spreadsheet before uploading.' });
+      return;
+    }
+    setIsUploading(true);
+    setMessage(null);
+    try {
+      const importedRows = await readSpreadsheet(selectedFile);
+      const now = new Date().toISOString();
+      const imported = [...new Map(importedRows.map(row => {
+        const record = {
+          ...row,
+          id: createId(),
+          department,
+          academicYear,
+          fileName: selectedFile.name,
+          createdAt: now,
+          updatedAt: now,
+        };
+        return [`${department}\u0000${academicYear}\u0000${row.applicationNumber.trim().toLowerCase()}`, record];
+      })).values()];
+      await saveModuleUploadFile(KEYS.RANK_STATEMENTS, department, academicYear, selectedFile);
+      const saved = mergeRankStatementRecords(imported);
+      const savedFiles = saveRankStatementUpload(department, academicYear, selectedFile.name);
+      setRecords(saved);
+      setUploadedFiles(savedFiles);
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setEditingId('');
+      setForm(null);
+      setMessage({ type: 'success', text: `Uploaded ${imported.length} rank statement record${imported.length === 1 ? '' : 's'}.` });
+      showToast('Rank statement spreadsheet uploaded successfully.', 'success');
+    } catch (error) {
+      console.error('Unable to upload rank statement spreadsheet.', error);
+      const text = error instanceof Error ? `Upload failed: ${error.message}` : 'Upload failed while reading or saving the spreadsheet.';
+      setMessage({ type: 'error', text });
+      showToast(text, 'error');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
-  const handlePhotoChange = (event) => {
-    if (!isFaculty || !isEditing) return;
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      showToast('Choose an image file for the candidate photo.', 'error');
-      event.target.value = '';
-      return;
+  const handleDeleteUploadedFile = async () => {
+    const hasUploadedFile = Boolean(uploadedFileName);
+    if (!window.confirm(hasUploadedFile
+      ? 'Delete the uploaded file? Existing rank statement records will remain unchanged.'
+      : 'Clear the selected file?')) return;
+    setIsDeletingFile(true);
+    try {
+      if (hasUploadedFile) {
+        setUploadedFiles(await deleteRankStatementUpload(department, academicYear));
+      }
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      const text = hasUploadedFile
+        ? 'Uploaded file removed. Existing rank statement records were kept.'
+        : 'Selected file cleared.';
+      setMessage({ type: 'success', text });
+      showToast(text, 'success');
+    } catch (error) {
+      console.error('Unable to delete rank statement upload.', error);
+      const text = error instanceof Error ? error.message : 'Unable to delete the uploaded file.';
+      setMessage({ type: 'error', text });
+      showToast(text, 'error');
+    } finally {
+      setIsDeletingFile(false);
     }
-    if (file.size > 1024 * 1024) {
-      showToast('The candidate photo must be smaller than 1 MB.', 'error');
-      event.target.value = '';
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => updateForm('photo', String(reader.result));
-    reader.onerror = () => showToast('Unable to read the candidate photo.', 'error');
-    reader.readAsDataURL(file);
   };
 
-  const handleSave = () => {
-    if (!isFaculty) {
-      showToast('Only faculty can save rank statements.', 'error');
-      return;
-    }
+  const startAdd = afterId => {
+    setEditingId('');
+    setInsertAfterId(afterId);
+    setForm({ ...emptyRankRecord(), department, academicYear });
+    setMessage(null);
+  };
 
-    const missingField = requiredFields.find(field => {
-      const value = displayForm?.[field];
-      return typeof value === 'string' ? !value.trim() : !value;
-    });
+  const startEdit = record => {
+    setEditingId(record.id);
+    setInsertAfterId(null);
+    setForm({ ...record });
+    setMessage(null);
+  };
 
-    if (!selectedStudent || missingField) {
-      showToast('Complete all rank statement details before saving.', 'error');
+  const cancelForm = () => {
+    setEditingId('');
+    setInsertAfterId(null);
+    setForm(null);
+  };
+
+  const saveForm = event => {
+    event.preventDefault();
+    const missing = RANK_COLUMNS.find(column => !String(form?.[column.key] ?? '').trim());
+    if (missing) {
+      setMessage({ type: 'error', text: `Enter ${missing.label}.` });
       return;
     }
 
     try {
-      const saved = saveRankStatement({
-        ...displayForm,
-        studentId: selectedStudent.id,
-        updatedAt: new Date().toISOString(),
-      }, user.role);
-      setStatements(saved);
-      setForm(saved.find(item => item.studentId === selectedStudent.id));
-      setEditing(false);
-      showToast('Rank statement saved.', 'success');
+      const now = new Date().toISOString();
+      const saved = editingId
+        ? updateRankStatementRecord({ ...form, id: editingId, updatedAt: now })
+        : insertRankStatementRecord({
+          ...form,
+          id: createId(),
+          department,
+          academicYear,
+          createdAt: now,
+          updatedAt: now,
+        }, insertAfterId);
+      setRecords(saved);
+      cancelForm();
+      setMessage({ type: 'success', text: editingId ? 'Rank statement updated.' : 'Rank statement added.' });
+      showToast(editingId ? 'Rank statement updated.' : 'Rank statement added.', 'success');
     } catch (error) {
-      console.error('Unable to save rank statement.', error);
-      showToast(error.message || 'Unable to save the rank statement.', 'error');
+      console.error('Unable to save rank statement record.', error);
+      const text = error instanceof Error ? error.message : 'Unable to save rank statement record.';
+      setMessage({ type: 'error', text });
+      showToast(text, 'error');
     }
   };
 
-  const handlePrint = () => window.print();
+  const handleDeleteRecord = record => {
+    if (!window.confirm(`Delete the rank statement for ${record.name}?`)) return;
+    try {
+      setRecords(deleteRankStatementRecord(record.id));
+      if (editingId === record.id) cancelForm();
+      setMessage({ type: 'success', text: `${record.name} was deleted.` });
+      showToast('Rank statement record deleted.', 'success');
+    } catch (error) {
+      console.error('Unable to delete rank statement record.', error);
+      const text = error instanceof Error ? error.message : 'Unable to delete rank statement record.';
+      setMessage({ type: 'error', text });
+      showToast(text, 'error');
+    }
+  };
 
   return (
-    <div className="rank-statement-page animate-fade-in space-y-5">
-      <style>{`
-        @media print {
-          @page { size: landscape; margin: 10mm; }
-          body * { visibility: hidden !important; }
-          .rank-statement-document, .rank-statement-document * { visibility: visible !important; }
-          .rank-statement-document {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            min-height: 0 !important;
-            margin: 0 !important;
-            print-color-adjust: exact !important;
-            -webkit-print-color-adjust: exact !important;
-          }
-          .rank-statement-document-inner { min-height: 0 !important; }
-        }
-      `}</style>
-
-      <div className="no-print flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-800">Rank Statement</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {isFaculty ? 'Create, edit, view, and print rank statements.' : 'View and print saved rank statements.'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {isFaculty && selectedStudent && savedStatement && !editing && (
-            <button type="button" onClick={() => setEditing(true)} className="btn-secondary btn-sm">
-              <Pencil size={14} /> Edit
-            </button>
-          )}
-          {isEditing && (
-            <button type="button" onClick={handleSave} className="btn-primary btn-sm">
-              <Save size={14} /> Save Rank Statement
-            </button>
-          )}
-          {selectedStudent && (
-            <button type="button" onClick={handlePrint} className="btn-secondary btn-sm">
-              <Printer size={14} /> Print
-            </button>
-          )}
-        </div>
+    <div className="animate-fade-in space-y-5">
+      <div>
+        <h1 className="text-xl font-bold text-slate-800">Rank Statement</h1>
+        <p className="mt-1 text-sm text-slate-500">Upload and manage rank statement records by department and academic year.</p>
       </div>
 
-      <div className="no-print card p-4">
-        {isFaculty && (
-          <div className="mb-4">
-            <label htmlFor="rank-candidate-search" className="label">Candidate Search</label>
-            <input
-              id="rank-candidate-search"
-              type="search"
-              className="input-field max-w-xl"
-              placeholder="Search by name or Application Number"
-              value={candidateSearch}
-              onChange={event => setCandidateSearch(event.target.value)}
-            />
-            {candidateSearch.trim() && (
-              matchingStudents.length ? (
-                <div className="mt-2 flex max-h-48 max-w-xl flex-col gap-1 overflow-y-auto">
-                  {matchingStudents.map(student => (
-                    <button
-                      key={student.id}
-                      type="button"
-                      onClick={() => selectStudent(student.id)}
-                      className="input-field text-left"
-                    >
-                      {student.name} — {student.applicationNo || student.admissionNo || student.id}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-2 text-sm text-slate-500">No candidates found.</p>
-              )
-            )}
+      <section className="card space-y-5 p-5">
+        <h2 className="section-title">1. Select Department &amp; Academic Year</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="rank-department" className="label">Select Department</label>
+            <select id="rank-department" className="input-field" value={department} onChange={event => {
+              setDepartment(event.target.value);
+              setMessage(null);
+              cancelForm();
+            }}>
+              <option value="">Choose a department</option>
+              {departmentOptions.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="rank-academic-year" className="label">Select Academic Year</label>
+            <select id="rank-academic-year" className="input-field" value={academicYear} onChange={event => {
+              setAcademicYear(event.target.value);
+              setMessage(null);
+              cancelForm();
+            }}>
+              <option value="">Choose an academic year</option>
+              {academicYearOptions.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section className="card space-y-5 p-5">
+        <div>
+          <h2 className="section-title">2. Upload Rank Statement Spreadsheet</h2>
+          <p className="mt-1 text-xs text-slate-500">Required columns: Application Number, Name of Candidate, Course Allotted, Random Number, Maximum Marks, Marks Obtained, Marks Obtained in Words, Cutoff Marks, Overall Rank.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+            className="sr-only"
+            onChange={handleFileChange}
+          />
+          <span className="min-w-0 flex-1 truncate text-sm text-slate-500" aria-live="polite">
+            {selectedFile
+              ? uploadedFileName ? `Selected: ${selectedFile.name} (replacing ${uploadedFileName})` : selectedFile.name
+              : uploadedFileName || 'No file selected'}
+          </span>
+          {(selectedFile || uploadedFileName) && (
+            <button type="button" className="btn-secondary btn-sm text-red-600" onClick={handleDeleteUploadedFile}
+              disabled={isUploading || isDeletingFile} aria-label="Delete uploaded file" title="Delete uploaded file">
+              <Trash2 size={14} aria-hidden="true" /> Delete Uploaded File
+            </button>
+          )}
+          <button type="button" className="btn-primary btn-sm"
+            onClick={() => selectedFile ? handleUpload() : fileInputRef.current?.click()}
+            disabled={isUploading || isDeletingFile || !department || !academicYear}>
+            <Upload size={14} /> {isUploading ? 'Uploading...' : 'Upload'}
+          </button>
+        </div>
+        <p className="text-xs text-slate-400">Supported spreadsheet formats: .xlsx and .xls.</p>
+
+        {message && (
+          <div role={message.type === 'error' ? 'alert' : 'status'}
+            className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${
+              message.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+            }`}>
+            {message.type === 'error' ? <AlertCircle size={17} className="mt-0.5 shrink-0" /> : <CheckCircle2 size={17} className="mt-0.5 shrink-0" />}
+            <span>{message.text}</span>
           </div>
         )}
-        {!isFaculty && <label htmlFor="rank-statement-student" className="label">Candidate</label>}
-        {!isFaculty && availableStudents.length ? (
-          <select
-            id="rank-statement-student"
-            className="input-field max-w-xl"
-            value={activeStudentId}
-            onChange={handleStudentChange}
-          >
-            {availableStudents.map(student => (
-              <option key={student.id} value={student.id}>
-                {student.name} — {student.applicationNo || student.admissionNo || student.id}
-              </option>
-            ))}
-          </select>
-        ) : !isFaculty && (
-          <p className="text-sm text-slate-500">
-            No rank statements have been saved yet.
-          </p>
-        )}
-        {isFaculty && !availableStudents.length && (
-          <p className="text-sm text-slate-500">No candidate records are available.</p>
-        )}
-      </div>
 
-      {selectedStudent && displayForm && (isFaculty || savedStatement) ? (
-        <div className={`grid items-start gap-5 ${isEditing ? 'xl:grid-cols-[minmax(280px,360px)_minmax(0,1fr)]' : 'grid-cols-1'}`}>
-          {isEditing && (
-            <section className="no-print card space-y-4 p-5">
-              <h2 className="section-title">Rank Statement Details</h2>
+        {form && (
+          <form onSubmit={saveForm} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <h3 className="mb-4 font-semibold text-slate-800">{editingId ? 'Edit Rank Statement' : 'Add Student'}</h3>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <div>
-                <label htmlFor="rank-application-number" className="label">Application Number</label>
-                <input id="rank-application-number" className="input-field" value={displayForm.applicationNumber || ''} onChange={event => updateForm('applicationNumber', event.target.value)} />
+                <label htmlFor="rank-serial" className="label">Serial Number</label>
+                <input id="rank-serial" className="input-field" value={editingId
+                  ? displayedRecords.findIndex(record => record.id === editingId) + 1
+                  : insertAfterId ? displayedRecords.findIndex(record => record.id === insertAfterId) + 2 : displayedRecords.length + 1}
+                readOnly />
               </div>
-              <div>
-                <label htmlFor="rank-candidate-name" className="label">Name of the Candidate</label>
-                <input id="rank-candidate-name" className="input-field" value={displayForm.name || ''} onChange={event => updateForm('name', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="rank-course-allotted" className="label">Course Allotted</label>
-                <input id="rank-course-allotted" className="input-field" value={displayForm.courseAllotted || ''} onChange={event => updateForm('courseAllotted', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="rank-random-number" className="label">Random Number</label>
-                <input id="rank-random-number" className="input-field" value={displayForm.randomNumber || ''} onChange={event => updateForm('randomNumber', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="rank-maximum-marks" className="label">Maximum Marks</label>
-                <input id="rank-maximum-marks" className="input-field" value={displayForm.maximumMarks || ''} onChange={event => updateForm('maximumMarks', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="rank-marks-obtained" className="label">Marks Obtained</label>
-                <input id="rank-marks-obtained" className="input-field" value={displayForm.marksObtained || ''} onChange={event => updateForm('marksObtained', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="rank-marks-obtained-words" className="label">Marks Obtained in Words</label>
-                <input id="rank-marks-obtained-words" className="input-field" value={displayForm.marksObtainedInWords || ''} onChange={event => updateForm('marksObtainedInWords', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="rank-cutoff-marks" className="label">Cut-off Marks</label>
-                <input id="rank-cutoff-marks" className="input-field" value={displayForm.cutOffMarks || ''} onChange={event => updateForm('cutOffMarks', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="rank-overall-rank" className="label">Overall Rank</label>
-                <input id="rank-overall-rank" className="input-field" value={displayForm.overallRank || ''} onChange={event => updateForm('overallRank', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="rank-nodal-officer" className="label">Nodal Officer-KVELL</label>
-                <input id="rank-nodal-officer" className="input-field" value={displayForm.nodalOfficer || 'Nodal Officer-KVELL'} onChange={event => updateForm('nodalOfficer', event.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="rank-candidate-photo" className="label">Candidate Photo</label>
-                <input id="rank-candidate-photo" type="file" accept="image/*" className="input-field" onChange={handlePhotoChange} />
-                <p className="mt-1 text-xs text-slate-400">Image files up to 1 MB.</p>
-              </div>
-            </section>
-          )}
-
-          <article className="rank-statement-document min-w-0 w-full rounded-2xl border-[7px] border-[#14528a] bg-[#d0eafb] p-2 text-[#17456c] shadow-sm">
-            <div className="rank-statement-document-inner overflow-hidden rounded-xl border border-[#8cb7d4] bg-white">
-              <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 bg-white px-3 py-3 sm:gap-4 sm:px-5">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full border-[3px] border-[#1b547d] text-center text-[9px] font-black leading-tight text-[#1b547d] sm:h-16 sm:w-16 sm:text-xs">
-                  KVELL
+              {RANK_COLUMNS.map(column => (
+                <div key={column.key}>
+                  <label htmlFor={`rank-${column.key}`} className="label">{column.label}</label>
+                  <input id={`rank-${column.key}`} className="input-field" value={form[column.key] || ''}
+                    onChange={event => setForm(current => ({ ...current, [column.key]: event.target.value }))} />
                 </div>
-                <div className="text-center">
-                  <h2 className="text-xs font-extrabold leading-tight sm:text-lg">
-                    KARPAGA VINAYAGA COLLEGE OF ENGINEERING AND TECHNOLOGY
-                  </h2>
-                  <p className="text-[9px] font-semibold sm:text-xs">(Approved by AICTE, New Delhi, Accredited by NAAC)</p>
-                  <p className="mt-0.5 text-[9px] font-bold leading-tight sm:text-sm">
-                    Karpaga Vinayaga Educational Lore for Learning (Deemed to be University)
-                  </p>
-                  <p className="text-[8px] leading-relaxed sm:text-xs">
-                    GST Road, Chinnakolambakkam, Padalam – 603 308, Madurantakam (Tk), Chengalpattu District
-                    <br />044 - 7156 6373 | kvelladmission2026@gmail.com
-                  </p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-full border-[3px] border-[#1b547d] text-center text-[8px] font-black leading-tight text-[#1b547d] sm:h-16 sm:w-16 sm:text-[10px]">
-                  KVELL
-                </div>
-              </header>
-
-              <h3 className="bg-[#fffde9] px-3 py-2 text-center text-sm font-extrabold leading-tight sm:px-5 sm:text-2xl">
-                  RANK STATEMENT
-              </h3>
-
-              <div className="grid grid-cols-1 gap-2 px-2 py-3 sm:grid-cols-3 sm:gap-3 sm:px-4 sm:py-4">
-                <div className="overflow-hidden border border-black">
-                  <p className="bg-[#c6e7f5] px-2 py-1 text-center text-xs font-bold">
-                    Application Number
-                  </p>
-                  <p className="min-h-8 border-t border-black px-2 py-2 text-xs">
-                    {displayForm.applicationNumber || ' '}
-                  </p>
-                </div>
-                <div className="overflow-hidden border border-black">
-                  <p className="bg-[#c6e7f5] px-2 py-1 text-center text-xs font-bold">
-                    Name of the Candidate
-                  </p>
-                  <p className="min-h-8 border-t border-black px-2 py-2 text-xs">
-                    {displayForm.name || ' '}
-                  </p>
-                </div>
-                <div className="overflow-hidden border border-black">
-                  <p className="bg-[#c6e7f5] px-2 py-1 text-center text-xs font-bold">
-                    Course Allotted
-                  </p>
-                  <p className="min-h-8 border-t border-black px-2 py-2 text-xs">
-                    {displayForm.courseAllotted || ' '}
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-2 px-2 pb-3 sm:grid-cols-[minmax(0,1fr)_minmax(120px,22%)] sm:gap-3 sm:px-4 sm:pb-4">
-                <div className="grid grid-cols-1 overflow-hidden border border-black sm:grid-cols-3">
-                  <div className="border-b border-black sm:border-r">
-                    <p className="bg-[#c6e7f5] px-2 py-1 text-center text-xs font-bold">
-                        Random Number
-                    </p>
-                    <p className="min-h-8 border-t border-black px-2 py-2 text-xs">
-                        {displayForm.randomNumber || ' '}
-                    </p>
-                  </div>
-                  <div className="border-b border-black sm:border-r">
-                    <p className="bg-[#c6e7f5] px-2 py-1 text-center text-xs font-bold">
-                        Maximum Marks
-                    </p>
-                    <p className="min-h-8 border-t border-black px-2 py-2 text-xs">
-                        {displayForm.maximumMarks || ' '}
-                    </p>
-                  </div>
-                  <div className="border-b border-black sm:border-b">
-                    <p className="bg-[#c6e7f5] px-2 py-1 text-center text-xs font-bold">
-                        Marks Obtained
-                    </p>
-                    <p className="min-h-8 border-t border-black px-2 py-2 text-xs">
-                        {displayForm.marksObtained || ' '}
-                    </p>
-                  </div>
-                  <div className="border-b border-black sm:border-r">
-                    <p className="bg-[#c6e7f5] px-2 py-1 text-center text-xs font-bold">
-                        Marks Obtained in Words
-                    </p>
-                    <p className="min-h-8 border-t border-black px-2 py-2 text-xs">
-                        {displayForm.marksObtainedInWords || ' '}
-                    </p>
-                  </div>
-                  <div className="border-b border-black sm:border-r">
-                    <p className="bg-[#c6e7f5] px-2 py-1 text-center text-xs font-bold">
-                        Cut-off Marks
-                    </p>
-                    <p className="min-h-8 border-t border-black px-2 py-2 text-xs">
-                        {displayForm.cutOffMarks || ' '}
-                    </p>
-                  </div>
-                  <div className="border-b border-black sm:border-b">
-                    <p className="bg-[#c6e7f5] px-2 py-1 text-center text-xs font-bold">
-                        Overall Rank
-                    </p>
-                    <p className="min-h-8 border-t border-black px-2 py-2 text-xs">
-                        {displayForm.overallRank || ' '}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 items-start gap-2 sm:grid-cols-1 sm:gap-1">
-                  <div className="flex h-32 items-center justify-center border border-black bg-white text-center text-xs font-bold sm:h-28 md:h-36">
-                  {displayForm.photo ? (
-                    <img src={displayForm.photo} alt={`Candidate ${displayForm.name}`} className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-slate-400">
-                      Candidate Photo
-                    </div>
-                  )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-end justify-between gap-4 border-t border-[#8cb7d4] px-4 pb-4 pt-3">
-                <div className="text-xs font-semibold">Nodal Officer - KVELL</div>
-                <div className="w-48 border-t border-[#17456c] pt-2 text-center text-xs font-bold">
-                  {displayForm.nodalOfficer || 'Nodal Officer-KVELL'}
-                </div>
-              </div>
+              ))}
             </div>
-          </article>
-        </div>
-      ) : selectedStudent && !isFaculty ? (
-        <p className="card p-5 text-sm text-slate-500">
-          No rank statement has been saved for this student.
-        </p>
-      ) : null}
+            <div className="mt-4 flex gap-2">
+              <button type="submit" className="btn-primary btn-sm"><Save size={14} /> Save</button>
+              <button type="button" className="btn-secondary btn-sm" onClick={cancelForm}><X size={14} /> Cancel</button>
+            </div>
+          </form>
+        )}
+
+        {department && academicYear ? (
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+              <div>
+                <h3 className="font-semibold text-slate-800">Rank Statement Records</h3>
+                <p className="text-xs text-slate-500">{department} · {academicYear}</p>
+              </div>
+              <span className="text-xs text-slate-500">{displayedRecords.length} record{displayedRecords.length === 1 ? '' : 's'}</span>
+            </div>
+            {displayedRecords.length ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
+                  <thead className="bg-white text-[11px] uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-3 py-3">S.No.</th>
+                      {RANK_COLUMNS.map(column => <th key={column.key} className="px-3 py-3">{column.label}</th>)}
+                      <th className="px-3 py-3">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
+                    {displayedRecords.map((record, index) => (
+                      <tr key={record.id} className="align-top">
+                        <td className="px-3 py-3 font-medium">{index + 1}</td>
+                        {RANK_COLUMNS.map(column => <td key={column.key} className="max-w-56 px-3 py-3">{record[column.key] || '—'}</td>)}
+                        <td className="px-3 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            <button type="button" className="btn-secondary btn-sm" onClick={() => startEdit(record)}><Pencil size={13} /> Edit</button>
+                            <button type="button" className="btn-secondary btn-sm text-red-600" onClick={() => handleDeleteRecord(record)}><Trash2 size={13} /> Delete</button>
+                            <button type="button" className="btn-secondary btn-sm" onClick={() => startAdd(record.id)}><Plus size={13} /> Add Student</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="px-4 py-6 text-center text-sm text-slate-500">No rank statement records for this selection yet.</p>
+            )}
+          </div>
+        ) : (
+          <p className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-500">Select a department and academic year to view rank statement records.</p>
+        )}
+      </section>
     </div>
   );
 }
