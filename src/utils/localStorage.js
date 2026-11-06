@@ -130,13 +130,51 @@ export const deleteModuleUploadFile = async (moduleKey, department, academicYear
   }
 };
 
+const deleteModuleUploadFiles = async (moduleKey) => {
+  const database = await openUploadDatabase();
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(UPLOAD_OBJECT_STORE, 'readwrite');
+      const store = transaction.objectStore(UPLOAD_OBJECT_STORE);
+      const request = store.openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        if (typeof cursor.key === 'string' && cursor.key.startsWith(`${moduleKey}\u0000`)) {
+          cursor.delete();
+        }
+        cursor.continue();
+      };
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(new Error('Unable to delete uploaded files.'));
+      transaction.onabort = () => reject(new Error('Unable to delete uploaded files.'));
+      request.onerror = () => reject(new Error('Unable to read uploaded files for deletion.'));
+    });
+  } catch (error) {
+    console.error('Unable to delete module uploaded files.', error);
+    throw error instanceof Error ? error : new Error('Unable to delete uploaded files.');
+  } finally {
+    database.close();
+  }
+};
+
 const getUploadReference = (key, department, academicYear) =>
   getUploadReferences(key).find(reference =>
     reference.department === department && reference.academicYear === academicYear
   ) || null;
 
-const deleteUploadReference = (key, department, academicYear) =>
-  saveUploadReference(key, department, academicYear, null);
+const removeUploadReference = (key, department, academicYear) => {
+  const updated = getUploadReferences(key).filter(reference =>
+    reference.department !== department || reference.academicYear !== academicYear
+  );
+  try {
+    localStorage.setItem(key, JSON.stringify(updated));
+    return updated;
+  } catch (error) {
+    console.error('Unable to remove uploaded file reference.', error);
+    throw new Error('Unable to remove the uploaded file name from this browser.');
+  }
+};
 
 export const getProvisionalAllotmentUpload = (department, academicYear) =>
   getUploadReference(KEYS.PROVISIONAL_ALLOTMENT_UPLOADS, department, academicYear);
@@ -144,20 +182,27 @@ export const getProvisionalAllotmentUpload = (department, academicYear) =>
 export const saveProvisionalAllotmentUpload = (department, academicYear, fileName) =>
   saveUploadReference(KEYS.PROVISIONAL_ALLOTMENT_UPLOADS, department, academicYear, fileName);
 
-export const deleteProvisionalAllotmentUpload = async (department, academicYear) => {
-  await deleteModuleUploadFile(KEYS.PROVISIONAL_ALLOTMENTS, department, academicYear);
-  return deleteUploadReference(KEYS.PROVISIONAL_ALLOTMENT_UPLOADS, department, academicYear);
-};
-
 export const getEntranceExaminationUpload = (department, academicYear) =>
   getUploadReference(KEYS.ENTRANCE_EXAMINATION_UPLOADS, department, academicYear);
 
 export const saveEntranceExaminationUpload = (department, academicYear, fileName) =>
   saveUploadReference(KEYS.ENTRANCE_EXAMINATION_UPLOADS, department, academicYear, fileName);
 
-export const deleteEntranceExaminationUpload = async (department, academicYear) => {
-  await deleteModuleUploadFile(KEYS.ENTRANCE_EXAMINATION_TICKETS, department, academicYear);
-  return deleteUploadReference(KEYS.ENTRANCE_EXAMINATION_UPLOADS, department, academicYear);
+export const deleteEntranceExaminationUpload = async () => {
+  await deleteModuleUploadFiles(KEYS.ENTRANCE_EXAMINATION_TICKETS);
+  try {
+    localStorage.setItem(KEYS.ENTRANCE_EXAMINATION_TICKETS, JSON.stringify([]));
+  } catch (error) {
+    console.error('Unable to clear entrance examination records.', error);
+    throw new Error('Unable to clear entrance examination records from this browser.');
+  }
+  try {
+    localStorage.setItem(KEYS.ENTRANCE_EXAMINATION_UPLOADS, JSON.stringify([]));
+  } catch (error) {
+    console.error('Unable to clear entrance examination upload references.', error);
+    throw new Error('Unable to clear entrance examination upload information from this browser.');
+  }
+  return { records: [], files: [] };
 };
 
 export const getRankStatementUpload = (department, academicYear) =>
@@ -166,9 +211,16 @@ export const getRankStatementUpload = (department, academicYear) =>
 export const saveRankStatementUpload = (department, academicYear, fileName) =>
   saveUploadReference(KEYS.RANK_STATEMENT_UPLOADS, department, academicYear, fileName);
 
-export const deleteRankStatementUpload = async (department, academicYear) => {
-  await deleteModuleUploadFile(KEYS.RANK_STATEMENTS, department, academicYear);
-  return deleteUploadReference(KEYS.RANK_STATEMENT_UPLOADS, department, academicYear);
+export const deleteRankStatementUpload = async () => {
+  await deleteModuleUploadFiles(KEYS.RANK_STATEMENTS);
+  const savedRecords = writeRankStatements([]);
+  try {
+    localStorage.setItem(KEYS.RANK_STATEMENT_UPLOADS, JSON.stringify([]));
+  } catch (error) {
+    console.error('Unable to clear rank statement upload references.', error);
+    throw new Error('Unable to clear rank statement upload information from this browser.');
+  }
+  return { records: savedRecords, files: [] };
 };
 
 // Students
@@ -188,12 +240,16 @@ export const updateStudent = (id, updates) => {
 
 export const deleteStudent = (id) => {
   const list = getStudents().filter(s => s.id !== id);
-  saveStudents(list);
+  try {
+    localStorage.setItem(KEYS.STUDENTS, JSON.stringify(list));
+  } catch (error) {
+    console.error('Unable to delete student record.', error);
+    throw new Error('Unable to delete the student record from this browser.');
+  }
 };
 
 export const findStudent = (id) => getStudents().find(s => s.id === id) || null;
 
-<<<<<<< HEAD
 export const recordDuplicateOverride = (override) => {
   if (getAuth()?.role !== 'Admin') {
     throw new Error('Only an administrator can record a duplicate override.');
@@ -205,13 +261,10 @@ export const recordDuplicateOverride = (override) => {
   setItem(KEYS.DUPLICATE_OVERRIDES, [...history, override]);
 };
 
-export const getProvisionalAllotments = () => getItem(KEYS.PROVISIONAL_ALLOTMENTS) || [];
-=======
 export const getProvisionalAllotments = () => {
   const allotments = getItem(KEYS.PROVISIONAL_ALLOTMENTS);
   return Array.isArray(allotments) ? allotments : [];
 };
->>>>>>> 53f1899 (Added my changes)
 
 const writeProvisionalAllotments = (allotments) => {
   try {
@@ -225,6 +278,31 @@ const writeProvisionalAllotments = (allotments) => {
 
 const provisionalAllotmentKey = (allotment) =>
   `${allotment.department}\u0000${allotment.academicYear}\u0000${allotment.identityKey}`;
+
+const retainManualProvisionalAllotments = (allotment) =>
+  allotment.fileName === 'Manually added';
+
+const removeUploadedProvisionalAllotments = (department, academicYear) => {
+  const allotments = getProvisionalAllotments().filter(item =>
+    item.department !== department
+    || item.academicYear !== academicYear
+    || retainManualProvisionalAllotments(item)
+  );
+  return writeProvisionalAllotments(allotments);
+};
+
+export const replaceProvisionalAllotments = (incoming) => {
+  const { department, academicYear } = incoming[0];
+  const allotments = removeUploadedProvisionalAllotments(department, academicYear);
+  return writeProvisionalAllotments([...allotments, ...incoming]);
+};
+
+export const deleteProvisionalAllotmentUpload = async (department, academicYear) => {
+  await deleteModuleUploadFile(KEYS.PROVISIONAL_ALLOTMENTS, department, academicYear);
+  const allotments = removeUploadedProvisionalAllotments(department, academicYear);
+  const files = removeUploadReference(KEYS.PROVISIONAL_ALLOTMENT_UPLOADS, department, academicYear);
+  return { allotments, files };
+};
 
 export const mergeProvisionalAllotments = (incoming) => {
   const allotments = getProvisionalAllotments();
@@ -362,6 +440,41 @@ export const saveEntranceExaminationRecords = (records, role) => {
   }
 };
 
+export const insertEntranceExaminationRecord = (record, role, afterId = null) => {
+  if (role !== 'Faculty' && role !== 'Admin') {
+    throw new Error('Only Faculty and Admission users can add entrance examination records.');
+  }
+
+  const records = getEntranceExaminationTickets();
+  if (records.some(item => item.id === record.id)) {
+    throw new Error('This entrance examination record already exists.');
+  }
+  const index = afterId
+    ? records.findIndex(item =>
+      item.id === afterId
+      && item.department === record.department
+      && item.academicYear === record.academicYear
+    ) + 1
+    : records.reduce((lastIndex, item, itemIndex) =>
+      item.department === record.department && item.academicYear === record.academicYear
+        ? itemIndex + 1
+        : lastIndex, -1
+    );
+  if (afterId && index === 0) {
+    throw new Error('The selected insertion position could not be found.');
+  }
+
+  const updatedRecords = [...records];
+  updatedRecords.splice(index < 0 ? updatedRecords.length : index, 0, record);
+  try {
+    localStorage.setItem(KEYS.ENTRANCE_EXAMINATION_TICKETS, JSON.stringify(updatedRecords));
+    return updatedRecords;
+  } catch (error) {
+    console.error('Unable to add entrance examination record.', error);
+    throw new Error('Unable to add entrance examination record in this browser.');
+  }
+};
+
 export const updateEntranceExaminationRecord = (record, role) => {
   if (role !== 'Faculty' && role !== 'Admin') {
     throw new Error('Only Faculty and Admission users can edit entrance examination records.');
@@ -379,6 +492,26 @@ export const updateEntranceExaminationRecord = (record, role) => {
   } catch (error) {
     console.error('Unable to update entrance examination record.', error);
     throw new Error('Unable to update entrance examination records in this browser.');
+  }
+};
+
+export const deleteEntranceExaminationRecord = (id, role) => {
+  if (role !== 'Faculty' && role !== 'Admin') {
+    throw new Error('Only Faculty and Admission users can delete entrance examination records.');
+  }
+
+  const records = getEntranceExaminationTickets();
+  const updatedRecords = records.filter(record => record.id !== id);
+  if (updatedRecords.length === records.length) {
+    throw new Error('This entrance examination record could not be found.');
+  }
+
+  try {
+    localStorage.setItem(KEYS.ENTRANCE_EXAMINATION_TICKETS, JSON.stringify(updatedRecords));
+    return updatedRecords;
+  } catch (error) {
+    console.error('Unable to delete entrance examination record.', error);
+    throw new Error('Unable to delete entrance examination record in this browser.');
   }
 };
 

@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Pencil, Save, Trash2, Upload, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Pencil, Plus, Save, Trash2, Upload, X } from 'lucide-react';
 import { readSheet } from 'read-excel-file/browser';
 import { readFirstSheet } from 'xls-reader';
 import { useAuth } from '../context/AuthContext';
@@ -7,16 +7,18 @@ import { useApp } from '../context/AppContext';
 import { BRANCH_CONFIG } from '../utils/demoData';
 import {
   KEYS,
+  deleteEntranceExaminationRecord,
   deleteEntranceExaminationUpload,
   getEntranceExaminationUpload,
   getEntranceExaminationTickets,
+  insertEntranceExaminationRecord,
   saveModuleUploadFile,
   saveEntranceExaminationUpload,
   saveEntranceExaminationRecords,
   updateEntranceExaminationRecord,
 } from '../utils/localStorage';
 
-const REQUIRED_COLUMNS = [
+const ENTRANCE_COLUMNS = [
   {
     key: 'name',
     label: 'Student Name',
@@ -61,6 +63,10 @@ const REQUIRED_COLUMNS = [
 
 const normalizeHeader = (value) => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 const normalizeIdentifier = (value) => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+const mapSpreadsheetFields = (headers, values) => Object.fromEntries(ENTRANCE_COLUMNS.map(column => {
+  const index = headers.findIndex(header => column.aliases.includes(normalizeHeader(header)));
+  return [column.key, values[index] || ''];
+}));
 const createId = () => globalThis.crypto?.randomUUID?.()
   || `entrance-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -93,48 +99,31 @@ const readSpreadsheet = async (file) => {
   const headerIndex = rows.findIndex(row => row.some(value => String(value ?? '').trim()));
   if (headerIndex < 0) throw new Error('The selected worksheet is empty.');
 
-  const headers = rows[headerIndex].map(value => String(value ?? '').trim());
-  const columnIndexes = new Map();
-  REQUIRED_COLUMNS.forEach(column => {
-    const index = headers.findIndex(header => column.aliases.includes(normalizeHeader(header)));
-    if (index >= 0) columnIndexes.set(column.key, index);
-  });
-
-  const missingColumns = REQUIRED_COLUMNS
-    .filter(column => !columnIndexes.has(column.key))
-    .map(column => column.label);
-  if (missingColumns.length) {
-    throw new Error(`Missing required spreadsheet columns: ${missingColumns.join(', ')}.`);
-  }
-
+  const headers = rows[headerIndex].map(value => value === null || value === undefined ? '' : String(value));
   const records = rows.slice(headerIndex + 1)
-    .map((row, rowIndex) => {
-      const record = Object.fromEntries(REQUIRED_COLUMNS.map(column => [
-        column.key,
-        cellToString(row[columnIndexes.get(column.key)], column.key),
-      ]));
-      if (Object.values(record).every(value => !value)) return null;
-
-      const missingValues = REQUIRED_COLUMNS
-        .filter(column => !record[column.key])
-        .map(column => column.label);
-      if (missingValues.length) {
-        throw new Error(`Spreadsheet row ${headerIndex + rowIndex + 2} is missing: ${missingValues.join(', ')}.`);
-      }
-      return record;
+    .map(row => {
+      const spreadsheetValues = headers.map((header, index) => cellToString(row[index]));
+      if (spreadsheetValues.every(value => !value)) return null;
+      const record = mapSpreadsheetFields(headers, spreadsheetValues);
+      ENTRANCE_COLUMNS.forEach(column => {
+        const index = headers.findIndex(header => column.aliases.includes(normalizeHeader(header)));
+        if (index >= 0) record[column.key] = cellToString(row[index], column.key);
+      });
+      return { ...record, spreadsheetHeaders: headers, spreadsheetValues };
     })
     .filter(Boolean);
 
   if (!records.length) throw new Error('The worksheet has a header row but no student records.');
-  return records;
+  return { headers, records };
 };
 
-const makeRecord = (record, department, academicYear) => ({
+const makeRecord = (record, department, academicYear, fileName) => ({
   ...record,
   id: createId(),
   department,
   academicYear,
-  identityKey: normalizeIdentifier(record.hallTicketNumber),
+  fileName,
+  identityKey: normalizeIdentifier(record.hallTicketNumber) || JSON.stringify(record.spreadsheetValues),
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 });
@@ -188,6 +177,8 @@ export default function EntranceExaminationPage() {
   const [message, setMessage] = useState(null);
   const [editingId, setEditingId] = useState('');
   const [editedRecord, setEditedRecord] = useState(null);
+  const [newRecord, setNewRecord] = useState(null);
+  const [newRecordAfterId, setNewRecordAfterId] = useState(null);
 
   const departmentOptions = useMemo(() => [...new Set([
     ...BRANCH_CONFIG.map(branch => branch.name),
@@ -198,19 +189,26 @@ export default function EntranceExaminationPage() {
     () => getAcademicYearOptions(students, records),
     [records, students]
   );
+  const savedUploadReference = department && academicYear
+    ? uploadedFiles.find(item => item.department === department && item.academicYear === academicYear)
+      || getEntranceExaminationUpload(department, academicYear)
+    : null;
+  const uploadedFileName = savedUploadReference?.fileName || '';
   const displayedRecords = useMemo(() => {
     const legacy = records
       .filter(record => !record.department || !record.academicYear)
       .map(record => getLegacyRecord(record, students))
       .filter(Boolean);
     return [...records.filter(record => record.department && record.academicYear), ...legacy]
-      .filter(record => record.department === department && record.academicYear === academicYear);
-  }, [academicYear, department, records, students]);
-  const savedUploadReference = department && academicYear
-    ? uploadedFiles.find(item => item.department === department && item.academicYear === academicYear)
-      || getEntranceExaminationUpload(department, academicYear)
-    : null;
-  const uploadedFileName = savedUploadReference?.fileName || '';
+      .filter(record =>
+        record.department === department
+        && record.academicYear === academicYear
+        && (!uploadedFileName || !record.fileName || record.fileName === 'Manually added' || record.fileName === uploadedFileName)
+      );
+  }, [academicYear, department, records, students, uploadedFileName]);
+  const displayedHeaders = displayedRecords.find(record => record.fileName === uploadedFileName)?.spreadsheetHeaders
+    || displayedRecords.find(record => record.spreadsheetHeaders)?.spreadsheetHeaders
+    || ENTRANCE_COLUMNS.map(column => column.label);
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0] || null;
@@ -220,12 +218,14 @@ export default function EntranceExaminationPage() {
       setSelectedFile(null);
       event.target.value = '';
       setMessage({ type: 'error', text: 'Choose a student spreadsheet in .xlsx or .xls format.' });
+      return;
     }
+    if (file) handleUpload(file);
   };
 
-  const handleUpload = async () => {
+  const handleUpload = async (file = selectedFile) => {
     if (!canManageRecords) return;
-    if (!department || !academicYear || !selectedFile) {
+    if (!department || !academicYear || !file) {
       setMessage({ type: 'error', text: 'Select a department, academic year, and spreadsheet before uploading.' });
       return;
     }
@@ -233,10 +233,10 @@ export default function EntranceExaminationPage() {
     setIsUploading(true);
     setMessage(null);
     try {
-      const spreadsheetRecords = await readSpreadsheet(selectedFile);
+      const { records: spreadsheetRecords } = await readSpreadsheet(file);
       const uniqueRecords = [...new Map(
         spreadsheetRecords.map(record => {
-          const entry = makeRecord(record, department, academicYear);
+          const entry = makeRecord(record, department, academicYear, file.name);
           return [`${entry.department}\u0000${entry.academicYear}\u0000${entry.identityKey}`, entry];
         })
       ).values()];
@@ -248,9 +248,9 @@ export default function EntranceExaminationPage() {
       const updatedCount = uniqueRecords.filter(record =>
         existingKeys.has(`${record.department}\u0000${record.academicYear}\u0000${record.identityKey}`)
       ).length;
-      await saveModuleUploadFile(KEYS.ENTRANCE_EXAMINATION_TICKETS, department, academicYear, selectedFile);
+      await saveModuleUploadFile(KEYS.ENTRANCE_EXAMINATION_TICKETS, department, academicYear, file);
       const saved = saveEntranceExaminationRecords(uniqueRecords, user.role);
-      const savedFiles = saveEntranceExaminationUpload(department, academicYear, selectedFile.name);
+      const savedFiles = saveEntranceExaminationUpload(department, academicYear, file.name);
       setRecords(saved);
       setUploadedFiles(savedFiles);
       setSelectedFile(null);
@@ -274,21 +274,19 @@ export default function EntranceExaminationPage() {
 
   const handleDeleteUploadedFile = async () => {
     const hasUploadedFile = Boolean(uploadedFileName);
-    const confirmation = hasUploadedFile
-      ? 'Delete the uploaded file? Existing student records will remain unchanged.'
-      : 'Clear the selected file?';
+    const confirmation = 'Delete the uploaded file and all Entrance Examination student records?';
     if (!window.confirm(confirmation)) return;
     setIsDeletingUploadedFile(true);
     try {
-      if (hasUploadedFile) {
-        const savedFiles = await deleteEntranceExaminationUpload(department, academicYear);
-        setUploadedFiles(savedFiles);
-      }
+      const { records: savedRecords, files: savedFiles } =
+        await deleteEntranceExaminationUpload();
+      setRecords(savedRecords);
+      setUploadedFiles(savedFiles);
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       const successMessage = hasUploadedFile
-        ? 'Uploaded file removed. Existing student records were kept.'
-        : 'Selected file cleared.';
+        ? 'Uploaded file and all Entrance Examination student records were removed.'
+        : 'Entrance Examination student records and selected file were cleared.';
       setMessage({ type: 'success', text: successMessage });
       showToast(successMessage, 'success');
     } catch (error) {
@@ -304,9 +302,14 @@ export default function EntranceExaminationPage() {
   const saveEditedRecord = () => {
     if (!editedRecord) return;
     try {
+      const mappedFields = editedRecord.spreadsheetHeaders
+        ? mapSpreadsheetFields(editedRecord.spreadsheetHeaders, editedRecord.spreadsheetValues)
+        : {};
       const saved = updateEntranceExaminationRecord({
         ...editedRecord,
-        identityKey: normalizeIdentifier(editedRecord.hallTicketNumber),
+        ...mappedFields,
+        identityKey: normalizeIdentifier(editedRecord.hallTicketNumber)
+          || JSON.stringify(editedRecord.spreadsheetValues || []),
         updatedAt: new Date().toISOString(),
       }, user.role);
       setRecords(saved);
@@ -321,6 +324,71 @@ export default function EntranceExaminationPage() {
         : 'Unable to update entrance examination record.';
       setMessage({ type: 'error', text: errorMessage });
       showToast(errorMessage, 'error');
+    }
+  };
+
+  const startAddRecord = (afterId = null) => {
+    setEditingId('');
+    setEditedRecord(null);
+    setNewRecordAfterId(afterId);
+    setNewRecord({
+      spreadsheetHeaders: displayedHeaders,
+      spreadsheetValues: displayedHeaders.map(() => ''),
+    });
+    setMessage(null);
+  };
+
+  const saveNewRecord = event => {
+    event.preventDefault();
+    if (!newRecord || !department || !academicYear) return;
+    if (!newRecord.spreadsheetValues.some(value => String(value ?? '').trim())) {
+      setMessage({ type: 'error', text: 'Enter at least one student detail.' });
+      return;
+    }
+    try {
+      const mappedFields = mapSpreadsheetFields(newRecord.spreadsheetHeaders, newRecord.spreadsheetValues);
+      const now = new Date().toISOString();
+      const entry = {
+        ...mappedFields,
+        ...newRecord,
+        id: createId(),
+        department,
+        academicYear,
+        fileName: 'Manually added',
+        identityKey: normalizeIdentifier(mappedFields.hallTicketNumber)
+          || JSON.stringify(newRecord.spreadsheetValues),
+        createdAt: now,
+        updatedAt: now,
+      };
+      setRecords(insertEntranceExaminationRecord(entry, user.role, newRecordAfterId));
+      setNewRecord(null);
+      setNewRecordAfterId(null);
+      setMessage({ type: 'success', text: 'Entrance examination record added.' });
+      showToast('Entrance examination record added.', 'success');
+    } catch (error) {
+      console.error('Unable to add entrance examination record.', error);
+      const text = error instanceof Error ? error.message : 'Unable to add entrance examination record.';
+      setMessage({ type: 'error', text });
+      showToast(text, 'error');
+    }
+  };
+
+  const handleDeleteRecord = record => {
+    const name = record.name || record.studentName || 'this student';
+    if (!window.confirm(`Delete ${name} from the entrance examination records?`)) return;
+    try {
+      setRecords(deleteEntranceExaminationRecord(record.id, user.role));
+      if (editingId === record.id) {
+        setEditingId('');
+        setEditedRecord(null);
+      }
+      setMessage({ type: 'success', text: `${name} was deleted.` });
+      showToast(`${name} was deleted.`, 'success');
+    } catch (error) {
+      console.error('Unable to delete entrance examination record.', error);
+      const text = error instanceof Error ? error.message : 'Unable to delete the selected student.';
+      setMessage({ type: 'error', text });
+      showToast(text, 'error');
     }
   };
 
@@ -370,7 +438,7 @@ export default function EntranceExaminationPage() {
       <section className="card space-y-5 p-5">
         <div>
           <h2 className="section-title">2. Upload Student Spreadsheet</h2>
-          <p className="mt-1 text-xs text-slate-500">Required columns: Student Name, Hall Ticket Number, Number of Candidates, Date of Birth, Course Applied, Exam Date, Exam Time, Exam Venue.</p>
+          <p className="mt-1 text-xs text-slate-500">Upload a student spreadsheet.</p>
         </div>
 
         {canManageRecords && (
@@ -410,6 +478,14 @@ export default function EntranceExaminationPage() {
                 <Upload size={14} />
                 {isUploading ? 'Uploading...' : 'Upload'}
               </button>
+              <button
+                type="button"
+                className="btn-secondary btn-sm"
+                onClick={startAddRecord}
+                disabled={!department || !academicYear || isUploading}
+              >
+                <Plus size={14} /> Add Student
+              </button>
             </div>
             <p className="text-xs text-slate-400">Supported spreadsheet formats: .xlsx and .xls.</p>
           </>
@@ -429,6 +505,41 @@ export default function EntranceExaminationPage() {
               : <CheckCircle2 size={17} className="mt-0.5 shrink-0" />}
             <span>{message.text}</span>
           </div>
+        )}
+
+        {newRecord && (
+          <form onSubmit={saveNewRecord} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <h3 className="mb-4 font-semibold text-slate-800">Add Student</h3>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {newRecord.spreadsheetHeaders.map((header, columnIndex) => (
+                <div key={`${header}-${columnIndex}`}>
+                  <label htmlFor={`entrance-new-${columnIndex}`} className="label">{header}</label>
+                  <input
+                    id={`entrance-new-${columnIndex}`}
+                    className="input-field"
+                    value={newRecord.spreadsheetValues[columnIndex] || ''}
+                    onChange={event => setNewRecord(current => ({
+                      ...current,
+                      spreadsheetValues: current.spreadsheetValues.map((value, index) =>
+                        index === columnIndex ? event.target.value : value
+                      ),
+                    }))}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="btn-secondary btn-sm" onClick={() => {
+                setNewRecord(null);
+                setNewRecordAfterId(null);
+              }}>
+                Cancel
+              </button>
+              <button type="submit" className="btn-primary btn-sm">
+                <Save size={14} /> Save Student
+              </button>
+            </div>
+          </form>
         )}
 
         <div className="overflow-hidden rounded-xl border border-slate-200">
@@ -462,8 +573,8 @@ export default function EntranceExaminationPage() {
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th scope="col" className="px-4 py-3">S.No.</th>
-                    {REQUIRED_COLUMNS.map(column => (
-                      <th scope="col" key={column.key} className="px-4 py-3">{column.label}</th>
+                    {displayedHeaders.map((header, columnIndex) => (
+                      <th scope="col" key={`${header}-${columnIndex}`} className="px-4 py-3">{header}</th>
                     ))}
                     {canManageRecords && <th scope="col" className="px-4 py-3">Actions</th>}
                   </tr>
@@ -474,32 +585,45 @@ export default function EntranceExaminationPage() {
                     return (
                       <tr key={record.id || `${record.hallTicketNumber}-${index}`} className="align-top text-slate-700">
                         <td className="px-4 py-3 font-medium">{index + 1}</td>
-                        {REQUIRED_COLUMNS.map(column => (
-                          <td key={column.key} className="max-w-64 px-4 py-3">
-                            {isEditing ? (
-                              <input
-                                aria-label={`${column.label} for ${record.name || record.hallTicketNumber}`}
-                                type={column.key === 'dateOfBirth' || column.key === 'examDate'
-                                  ? 'date'
-                                  : column.key === 'examTime'
-                                    ? 'time'
-                                    : 'text'}
-                                className="input-field min-w-40 py-1.5 text-xs"
-                                value={editedRecord?.[column.key] || ''}
-                                onChange={event => setEditedRecord(current => ({
-                                  ...current,
-                                  [column.key]: event.target.value,
-                                }))}
-                              />
-                            ) : (
-                              record[column.key] || '—'
-                            )}
-                          </td>
-                        ))}
+                        {displayedHeaders
+                          .map((header, columnIndex) => {
+                            const column = ENTRANCE_COLUMNS.find(item => item.label === header);
+                            const value = record.spreadsheetValues
+                              ? record.spreadsheetValues[columnIndex]
+                              : record[column?.key];
+                            const fieldKey = column?.key || header;
+                            return (
+                              <td key={`${header}-${columnIndex}`} className="max-w-64 px-4 py-3">
+                                {isEditing ? (
+                                  <input
+                                    aria-label={`${header} for ${record.name || record.hallTicketNumber}`}
+                                    type={column?.key === 'dateOfBirth' || column?.key === 'examDate'
+                                      ? 'date'
+                                      : column?.key === 'examTime' ? 'time' : 'text'}
+                                    className="input-field min-w-40 py-1.5 text-xs"
+                                    value={record.spreadsheetHeaders
+                                      ? editedRecord?.spreadsheetValues?.[columnIndex] || ''
+                                      : editedRecord?.[fieldKey] || ''}
+                                    onChange={event => setEditedRecord(current => current.spreadsheetHeaders
+                                      ? {
+                                        ...current,
+                                        spreadsheetValues: current.spreadsheetValues.map((item, index) =>
+                                          index === columnIndex ? event.target.value : item
+                                        ),
+                                      }
+                                      : { ...current, [fieldKey]: event.target.value })}
+                                  />
+                                ) : (
+                                  value || '—'
+                                )}
+                              </td>
+                            );
+                          })}
                         {canManageRecords && (
                           <td className="px-4 py-3">
-                            {isEditing ? (
-                              <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1">
+                              {isEditing ? (
+                                <>
                                 <button type="button" className="btn-primary btn-sm" onClick={saveEditedRecord}>
                                   <Save size={13} /> Save
                                 </button>
@@ -514,20 +638,39 @@ export default function EntranceExaminationPage() {
                                 >
                                   <X size={13} />
                                 </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                className="btn-secondary btn-sm"
-                                onClick={() => {
-                                  setEditingId(record.id);
-                                  setEditedRecord({ ...record });
-                                  setMessage(null);
-                                }}
-                              >
-                                <Pencil size={13} /> Edit
-                              </button>
-                            )}
+                                </>
+                              ) : (
+                                <>
+                                <button
+                                  type="button"
+                                  className="btn-secondary btn-sm"
+                                  onClick={() => {
+                                    setEditingId(record.id);
+                                    setEditedRecord({ ...record });
+                                    setNewRecord(null);
+                                    setMessage(null);
+                                  }}
+                                >
+                                  <Pencil size={13} /> Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-secondary btn-sm text-red-600"
+                                  onClick={() => handleDeleteRecord(record)}
+                                  aria-label={`Delete ${record.name || record.studentName || 'student'}`}
+                                >
+                                  <Trash2 size={13} /> Delete
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-secondary btn-sm"
+                                  onClick={() => startAddRecord(record.id)}
+                                >
+                                  <Plus size={13} /> Add Student
+                                </button>
+                                </>
+                              )}
+                            </div>
                           </td>
                         )}
                       </tr>

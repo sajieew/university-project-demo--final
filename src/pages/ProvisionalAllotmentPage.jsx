@@ -11,7 +11,7 @@ import {
   getProvisionalAllotmentUpload,
   getProvisionalAllotments,
   insertProvisionalAllotment,
-  mergeProvisionalAllotments,
+  replaceProvisionalAllotments,
   saveModuleUploadFile,
   saveProvisionalAllotmentUpload,
   updateProvisionalAllotment,
@@ -57,14 +57,15 @@ const getAcademicYearOptions = (students, allotments) => {
   ].filter(Boolean))].sort((a, b) => b.localeCompare(a));
 };
 
-const makeUniqueHeaders = (headerCells, width) => {
+const makeUniqueHeaders = (headerCells) => {
   const counts = new Map();
-  return Array.from({ length: width }, (_, index) => {
-    const base = cellToString(headerCells[index]) || `Column ${index + 1}`;
-    const count = (counts.get(base) || 0) + 1;
-    counts.set(base, count);
-    return count === 1 ? base : `${base} (${count})`;
-  });
+  return headerCells.reduce((headers, cell, index) => {
+    const base = cellToString(cell);
+    if (!base || counts.has(base)) return headers;
+    counts.set(base, true);
+    headers.push({ name: base, index });
+    return headers;
+  }, []);
 };
 
 const readSpreadsheet = async (file) => {
@@ -82,10 +83,10 @@ const readSpreadsheet = async (file) => {
   const headerIndex = rows.findIndex(row => row.some(value => cellToString(value)));
   if (headerIndex < 0) throw new Error('The selected worksheet is empty.');
 
-  const width = Math.max(...rows.slice(headerIndex).map(row => row.length));
-  const headers = makeUniqueHeaders(rows[headerIndex], width);
+  const columns = makeUniqueHeaders(rows[headerIndex]);
+  const headers = columns.map(column => column.name);
   const dataRows = rows.slice(headerIndex + 1)
-    .map(row => Object.fromEntries(headers.map((header, index) => [header, cellToString(row[index])])))
+    .map(row => Object.fromEntries(columns.map(({ name, index }) => [name, cellToString(row[index])])))
     .filter(row => Object.values(row).some(Boolean));
 
   if (!dataRows.length) throw new Error('The worksheet has a header row but no allotment records.');
@@ -161,6 +162,7 @@ export default function ProvisionalAllotmentPage() {
   const [department, setDepartment] = useState('');
   const [academicYear, setAcademicYear] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
+  const [studentNameSearch, setStudentNameSearch] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [isDeletingUploadedFile, setIsDeletingUploadedFile] = useState(false);
   const [message, setMessage] = useState(null);
@@ -179,7 +181,7 @@ export default function ProvisionalAllotmentPage() {
     () => getAcademicYearOptions(students, allotments),
     [allotments, students]
   );
-  const displayedAllotments = useMemo(() => allotments.filter(item =>
+  const scopedAllotments = useMemo(() => allotments.filter(item =>
     item.department === department
     && item.academicYear === academicYear
     && item.rowData
@@ -189,12 +191,22 @@ export default function ProvisionalAllotmentPage() {
     ? uploadedFiles.find(item => item.department === department && item.academicYear === academicYear)
       || getProvisionalAllotmentUpload(department, academicYear)
     : null;
-  const uploadedFileName = savedUploadReference
-    ? savedUploadReference.fileName || ''
-    : displayedAllotments.find(item => item.fileName)?.fileName || '';
-  const displayedHeaders = useMemo(() => [...new Set(
-    [...DEFAULT_MANUAL_HEADERS, ...displayedAllotments.flatMap(item => item.headers || Object.keys(item.rowData || {}))]
-  )], [displayedAllotments]);
+  const uploadedFileName = savedUploadReference?.fileName
+    || scopedAllotments.find(item => item.fileName && item.fileName !== 'Manually added')?.fileName
+    || '';
+  const displayedAllotments = useMemo(() => scopedAllotments.filter(item =>
+    !uploadedFileName || item.fileName === uploadedFileName
+  ), [scopedAllotments, uploadedFileName]);
+  const matchingAllotments = useMemo(() => {
+    const query = studentNameSearch.trim().toLowerCase();
+    if (!query) return displayedAllotments;
+    return displayedAllotments.filter(record => {
+      const linkedStudent = students.find(student => student.id === record.studentId);
+      const name = getRowValue(record.rowData, NAME_HEADERS) || linkedStudent?.name || record.studentName || '';
+      return name.toLowerCase().includes(query);
+    });
+  }, [displayedAllotments, studentNameSearch, students]);
+  const displayedHeaders = displayedAllotments[0]?.headers || DEFAULT_MANUAL_HEADERS;
   const handleFileChange = (event) => {
     const file = event.target.files?.[0] || null;
     setMessage(null);
@@ -205,10 +217,11 @@ export default function ProvisionalAllotmentPage() {
       return;
     }
     setSelectedFile(file);
+    if (file) handleUpload(file);
   };
 
-  const handleUpload = async () => {
-    if (!department || !academicYear || !selectedFile) {
+  const handleUpload = async (file = selectedFile) => {
+    if (!department || !academicYear || !file) {
       setMessage({ type: 'error', text: 'Select a department, academic year, and file before uploading.' });
       return;
     }
@@ -216,20 +229,24 @@ export default function ProvisionalAllotmentPage() {
     setIsUploading(true);
     setMessage(null);
     try {
-      const { headers, dataRows } = await readSpreadsheet(selectedFile);
+      const { headers, dataRows } = await readSpreadsheet(file);
       const incoming = dataRows.map(row =>
-        makeImportRecord(row, headers, department, academicYear, selectedFile.name, students)
+        makeImportRecord(row, headers, department, academicYear, file.name, students)
       );
       const existingKeys = new Set(
         getProvisionalAllotments()
-          .filter(item => item.department === department && item.academicYear === academicYear)
+          .filter(item =>
+            item.department === department
+            && item.academicYear === academicYear
+            && item.fileName !== 'Manually added'
+          )
           .map(recordKey)
       );
       const uniqueIncoming = [...new Map(incoming.map(record => [recordKey(record), record])).values()];
       const updatedCount = uniqueIncoming.filter(record => existingKeys.has(recordKey(record))).length;
-      await saveModuleUploadFile(KEYS.PROVISIONAL_ALLOTMENTS, department, academicYear, selectedFile);
-      const saved = mergeProvisionalAllotments(uniqueIncoming);
-      const savedFiles = saveProvisionalAllotmentUpload(department, academicYear, selectedFile.name);
+      await saveModuleUploadFile(KEYS.PROVISIONAL_ALLOTMENTS, department, academicYear, file);
+      const saved = replaceProvisionalAllotments(uniqueIncoming);
+      const savedFiles = saveProvisionalAllotmentUpload(department, academicYear, file.name);
       setAllotments(saved);
       setUploadedFiles(savedFiles);
       setEditingId('');
@@ -254,15 +271,17 @@ export default function ProvisionalAllotmentPage() {
   };
 
   const handleDeleteUploadedFile = async () => {
-    if (!window.confirm('Delete the uploaded file? Existing student records will remain unchanged.')) return;
+    if (!window.confirm('Delete the uploaded file and its student records?')) return;
     setIsDeletingUploadedFile(true);
     try {
-      const savedFiles = await deleteProvisionalAllotmentUpload(department, academicYear);
+      const { allotments: savedAllotments, files: savedFiles } =
+        await deleteProvisionalAllotmentUpload(department, academicYear);
+      setAllotments(savedAllotments);
       setUploadedFiles(savedFiles);
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
-      setMessage({ type: 'success', text: 'Uploaded file removed. Existing student records were kept.' });
-      showToast('Uploaded file removed. Existing student records were kept.', 'success');
+      setMessage({ type: 'success', text: 'Uploaded file and its student records were removed.' });
+      showToast('Uploaded file and its student records were removed.', 'success');
     } catch (error) {
       console.error('Unable to delete provisional allotment file.', error);
       const text = error instanceof Error ? error.message : 'Unable to delete the uploaded file.';
@@ -312,12 +331,12 @@ export default function ProvisionalAllotmentPage() {
     }
 
     try {
-      const rowData = Object.fromEntries(displayedHeaders.map(header => [header, '']));
+      const rowData = Object.fromEntries(DEFAULT_MANUAL_HEADERS.map(header => [header, '']));
       rowData.Name = manualRow.name.trim();
       rowData['Application No.'] = manualRow.applicationNumber.trim();
       const record = makeImportRecord(
         rowData,
-        displayedHeaders,
+        DEFAULT_MANUAL_HEADERS,
         manualRow.department,
         manualRow.academicYear,
         'Manually added',
@@ -475,8 +494,18 @@ export default function ProvisionalAllotmentPage() {
             </p>
           </div>
           {department && academicYear && (
+            <input
+              type="search"
+              className="input-field w-full max-w-xs"
+              placeholder="Search student name"
+              aria-label="Search student name"
+              value={studentNameSearch}
+              onChange={event => setStudentNameSearch(event.target.value)}
+            />
+          )}
+          {department && academicYear && (
             <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
-              {displayedAllotments.length} record{displayedAllotments.length === 1 ? '' : 's'}
+              {matchingAllotments.length} record{matchingAllotments.length === 1 ? '' : 's'}
             </span>
           )}
         </div>
@@ -488,6 +517,10 @@ export default function ProvisionalAllotmentPage() {
         ) : displayedAllotments.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-slate-500">
             No student records have been added for this selection.
+          </p>
+        ) : matchingAllotments.length === 0 ? (
+          <p className="px-5 py-8 text-center text-sm text-slate-500">
+            No student records found
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -501,7 +534,7 @@ export default function ProvisionalAllotmentPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {displayedAllotments.map((record, index) => {
+                {matchingAllotments.map((record, index) => {
                   const isEditing = editingId === record.id;
                   const linkedStudent = students.find(student => student.id === record.studentId);
                   return (

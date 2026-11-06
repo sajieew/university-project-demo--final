@@ -31,6 +31,10 @@ const RANK_COLUMNS = [
 
 const emptyRankRecord = () => Object.fromEntries(RANK_COLUMNS.map(column => [column.key, '']));
 const normalizeHeader = value => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+const mapSpreadsheetFields = (headers, values) => Object.fromEntries(RANK_COLUMNS.map(column => {
+  const index = headers.findIndex(header => column.aliases.includes(normalizeHeader(header)));
+  return [column.key, values[index] || ''];
+}));
 const createId = () => globalThis.crypto?.randomUUID?.()
   || `rank-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -53,31 +57,17 @@ const readSpreadsheet = async file => {
   if (!rows?.length) throw new Error('The selected workbook does not contain a readable worksheet.');
   const headerIndex = rows.findIndex(row => row.some(value => cellToString(value)));
   if (headerIndex < 0) throw new Error('The selected worksheet is empty.');
-  const headers = rows[headerIndex].map(normalizeHeader);
-  const columnIndexes = new Map(RANK_COLUMNS.map(column => [
-    column.key,
-    headers.findIndex(header => column.aliases.includes(header)),
-  ]));
-  const missing = RANK_COLUMNS.filter(column => columnIndexes.get(column.key) < 0);
-  if (missing.length) {
-    throw new Error(`Missing required spreadsheet columns: ${missing.map(column => column.label).join(', ')}.`);
-  }
-
-  const records = rows.slice(headerIndex + 1).map((row, rowIndex) => {
-    const record = Object.fromEntries(RANK_COLUMNS.map(column => [
-      column.key,
-      cellToString(row[columnIndexes.get(column.key)]),
-    ]));
-    if (Object.values(record).every(value => !value)) return null;
-    const missingValues = RANK_COLUMNS.filter(column => !record[column.key]);
-    if (missingValues.length) {
-      throw new Error(`Spreadsheet row ${headerIndex + rowIndex + 2} is missing: ${missingValues.map(column => column.label).join(', ')}.`);
-    }
-    return record;
+  const headers = rows[headerIndex].map(value => value === null || value === undefined ? '' : String(value));
+  const records = rows.slice(headerIndex + 1).map(row => {
+    const spreadsheetValues = headers.map((header, index) => cellToString(row[index]));
+    if (spreadsheetValues.every(value => !value)) return null;
+    const record = mapSpreadsheetFields(headers, spreadsheetValues);
+    if (!record.applicationNumber) record.applicationNumber = JSON.stringify(spreadsheetValues);
+    return { ...record, spreadsheetHeaders: headers, spreadsheetValues };
   }).filter(Boolean);
 
   if (!records.length) throw new Error('The worksheet has a header row but no rank statement records.');
-  return records;
+  return { headers, records };
 };
 
 const getAcademicYearOptions = (students, records) => {
@@ -118,30 +108,42 @@ export default function RankStatementPage() {
     () => getAcademicYearOptions(students, records),
     [records, students]
   );
-  const displayedRecords = useMemo(() => records.filter(record =>
-    record.department === department && record.academicYear === academicYear
-  ), [academicYear, department, records]);
   const savedUploadReference = department && academicYear
     ? uploadedFiles.find(item => item.department === department && item.academicYear === academicYear)
       || getRankStatementUpload(department, academicYear)
     : null;
   const uploadedFileName = savedUploadReference?.fileName || '';
+  const displayedRecords = useMemo(() => records.filter(record =>
+    record.department === department
+    && record.academicYear === academicYear
+    && (!uploadedFileName || !record.fileName || record.fileName === 'Manually added' || record.fileName === uploadedFileName)
+  ), [academicYear, department, records, uploadedFileName]);
+  const displayedHeaders = displayedRecords.find(record => record.fileName === uploadedFileName)?.spreadsheetHeaders
+    || displayedRecords.find(record => record.spreadsheetHeaders)?.spreadsheetHeaders
+    || RANK_COLUMNS.map(column => column.label);
 
   const handleFileChange = event => {
     const file = event.target.files?.[0] || null;
     setSelectedFile(file);
     setMessage(null);
+    if (file && !/\.(xlsx|xls)$/i.test(file.name)) {
+      setSelectedFile(null);
+      event.target.value = '';
+      setMessage({ type: 'error', text: 'Choose a rank statement spreadsheet in .xlsx or .xls format.' });
+      return;
+    }
+    if (file) handleUpload(file);
   };
 
-  const handleUpload = async () => {
-    if (!department || !academicYear || !selectedFile) {
+  const handleUpload = async (file = selectedFile) => {
+    if (!department || !academicYear || !file) {
       setMessage({ type: 'error', text: 'Select a department, academic year, and spreadsheet before uploading.' });
       return;
     }
     setIsUploading(true);
     setMessage(null);
     try {
-      const importedRows = await readSpreadsheet(selectedFile);
+      const { records: importedRows } = await readSpreadsheet(file);
       const now = new Date().toISOString();
       const imported = [...new Map(importedRows.map(row => {
         const record = {
@@ -149,15 +151,15 @@ export default function RankStatementPage() {
           id: createId(),
           department,
           academicYear,
-          fileName: selectedFile.name,
+          fileName: file.name,
           createdAt: now,
           updatedAt: now,
         };
         return [`${department}\u0000${academicYear}\u0000${row.applicationNumber.trim().toLowerCase()}`, record];
       })).values()];
-      await saveModuleUploadFile(KEYS.RANK_STATEMENTS, department, academicYear, selectedFile);
+      await saveModuleUploadFile(KEYS.RANK_STATEMENTS, department, academicYear, file);
       const saved = mergeRankStatementRecords(imported);
-      const savedFiles = saveRankStatementUpload(department, academicYear, selectedFile.name);
+      const savedFiles = saveRankStatementUpload(department, academicYear, file.name);
       setRecords(saved);
       setUploadedFiles(savedFiles);
       setSelectedFile(null);
@@ -178,19 +180,18 @@ export default function RankStatementPage() {
 
   const handleDeleteUploadedFile = async () => {
     const hasUploadedFile = Boolean(uploadedFileName);
-    if (!window.confirm(hasUploadedFile
-      ? 'Delete the uploaded file? Existing rank statement records will remain unchanged.'
-      : 'Clear the selected file?')) return;
+    if (!window.confirm('Delete the uploaded file and all Rank Statement student records?')) return;
     setIsDeletingFile(true);
     try {
-      if (hasUploadedFile) {
-        setUploadedFiles(await deleteRankStatementUpload(department, academicYear));
-      }
+      const { records: savedRecords, files: savedFiles } =
+        await deleteRankStatementUpload();
+      setRecords(savedRecords);
+      setUploadedFiles(savedFiles);
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       const text = hasUploadedFile
-        ? 'Uploaded file removed. Existing rank statement records were kept.'
-        : 'Selected file cleared.';
+        ? 'Uploaded file and all Rank Statement student records were removed.'
+        : 'Rank Statement student records and selected file were cleared.';
       setMessage({ type: 'success', text });
       showToast(text, 'success');
     } catch (error) {
@@ -206,14 +207,26 @@ export default function RankStatementPage() {
   const startAdd = afterId => {
     setEditingId('');
     setInsertAfterId(afterId);
-    setForm({ ...emptyRankRecord(), department, academicYear });
+    const spreadsheetValues = displayedHeaders.map(() => '');
+    setForm({
+      ...emptyRankRecord(),
+      ...mapSpreadsheetFields(displayedHeaders, spreadsheetValues),
+      spreadsheetHeaders: displayedHeaders,
+      spreadsheetValues,
+      department,
+      academicYear,
+      fileName: 'Manually added',
+    });
     setMessage(null);
   };
 
   const startEdit = record => {
     setEditingId(record.id);
     setInsertAfterId(null);
-    setForm({ ...record });
+    const headers = record.spreadsheetHeaders || RANK_COLUMNS.map(column => column.label);
+    const spreadsheetValues = record.spreadsheetValues
+      || headers.map(header => record[RANK_COLUMNS.find(column => column.label === header)?.key] || '');
+    setForm({ ...record, spreadsheetHeaders: headers, spreadsheetValues });
     setMessage(null);
   };
 
@@ -225,18 +238,24 @@ export default function RankStatementPage() {
 
   const saveForm = event => {
     event.preventDefault();
-    const missing = RANK_COLUMNS.find(column => !String(form?.[column.key] ?? '').trim());
-    if (missing) {
-      setMessage({ type: 'error', text: `Enter ${missing.label}.` });
+    if (!form?.spreadsheetValues?.some(value => String(value ?? '').trim())) {
+      setMessage({ type: 'error', text: 'Enter at least one student detail.' });
       return;
     }
 
     try {
       const now = new Date().toISOString();
+      const mappedFields = mapSpreadsheetFields(form.spreadsheetHeaders, form.spreadsheetValues);
+      const record = {
+        ...form,
+        ...mappedFields,
+        applicationNumber: mappedFields.applicationNumber || JSON.stringify(form.spreadsheetValues),
+        updatedAt: now,
+      };
       const saved = editingId
-        ? updateRankStatementRecord({ ...form, id: editingId, updatedAt: now })
+        ? updateRankStatementRecord({ ...record, id: editingId })
         : insertRankStatementRecord({
-          ...form,
+          ...record,
           id: createId(),
           department,
           academicYear,
@@ -308,7 +327,7 @@ export default function RankStatementPage() {
       <section className="card space-y-5 p-5">
         <div>
           <h2 className="section-title">2. Upload Rank Statement Spreadsheet</h2>
-          <p className="mt-1 text-xs text-slate-500">Required columns: Application Number, Name of Candidate, Course Allotted, Random Number, Maximum Marks, Marks Obtained, Marks Obtained in Words, Cutoff Marks, Overall Rank.</p>
+          <p className="mt-1 text-xs text-slate-500">Upload a rank statement spreadsheet.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <input
@@ -334,6 +353,11 @@ export default function RankStatementPage() {
             disabled={isUploading || isDeletingFile || !department || !academicYear}>
             <Upload size={14} /> {isUploading ? 'Uploading...' : 'Upload'}
           </button>
+          <button type="button" className="btn-secondary btn-sm"
+            onClick={() => startAdd(null)}
+            disabled={isUploading || isDeletingFile || !department || !academicYear}>
+            <Plus size={14} /> Add Student
+          </button>
         </div>
         <p className="text-xs text-slate-400">Supported spreadsheet formats: .xlsx and .xls.</p>
 
@@ -358,11 +382,17 @@ export default function RankStatementPage() {
                   : insertAfterId ? displayedRecords.findIndex(record => record.id === insertAfterId) + 2 : displayedRecords.length + 1}
                 readOnly />
               </div>
-              {RANK_COLUMNS.map(column => (
-                <div key={column.key}>
-                  <label htmlFor={`rank-${column.key}`} className="label">{column.label}</label>
-                  <input id={`rank-${column.key}`} className="input-field" value={form[column.key] || ''}
-                    onChange={event => setForm(current => ({ ...current, [column.key]: event.target.value }))} />
+              {form.spreadsheetHeaders.map((header, columnIndex) => (
+                <div key={`${header}-${columnIndex}`}>
+                  <label htmlFor={`rank-${columnIndex}`} className="label">{header}</label>
+                  <input id={`rank-${columnIndex}`} className="input-field"
+                    value={form.spreadsheetValues[columnIndex] || ''}
+                    onChange={event => setForm(current => ({
+                      ...current,
+                      spreadsheetValues: current.spreadsheetValues.map((value, index) =>
+                        index === columnIndex ? event.target.value : value
+                      ),
+                    }))} />
                 </div>
               ))}
             </div>
@@ -388,7 +418,9 @@ export default function RankStatementPage() {
                   <thead className="bg-white text-[11px] uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-3 py-3">S.No.</th>
-                      {RANK_COLUMNS.map(column => <th key={column.key} className="px-3 py-3">{column.label}</th>)}
+                      {displayedHeaders.map((header, columnIndex) => (
+                          <th key={`${header}-${columnIndex}`} className="px-3 py-3">{header}</th>
+                        ))}
                       <th className="px-3 py-3">Actions</th>
                     </tr>
                   </thead>
@@ -396,9 +428,20 @@ export default function RankStatementPage() {
                     {displayedRecords.map((record, index) => (
                       <tr key={record.id} className="align-top">
                         <td className="px-3 py-3 font-medium">{index + 1}</td>
-                        {RANK_COLUMNS.map(column => <td key={column.key} className="max-w-56 px-3 py-3">{record[column.key] || '—'}</td>)}
+                        {displayedHeaders
+                          .map((header, columnIndex) => {
+                            const column = RANK_COLUMNS.find(item => item.label === header);
+                            const value = record.spreadsheetValues
+                              ? record.spreadsheetValues[columnIndex]
+                              : record[column?.key];
+                            return (
+                              <td key={`${header}-${columnIndex}`} className="max-w-56 px-3 py-3">
+                                {value || '—'}
+                              </td>
+                            );
+                          })}
                         <td className="px-3 py-3">
-                          <div className="flex flex-wrap gap-1">
+                          <div className="flex items-center gap-1">
                             <button type="button" className="btn-secondary btn-sm" onClick={() => startEdit(record)}><Pencil size={13} /> Edit</button>
                             <button type="button" className="btn-secondary btn-sm text-red-600" onClick={() => handleDeleteRecord(record)}><Trash2 size={13} /> Delete</button>
                             <button type="button" className="btn-secondary btn-sm" onClick={() => startAdd(record.id)}><Plus size={13} /> Add Student</button>
